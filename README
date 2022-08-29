@@ -1,0 +1,2 @@
+- Try python ./src/mfd_safety.py -i ./example_inputs/example.graph -o ./example_inputs/example.paths
+- This code assumes the vertices of the graph to be numbers in 1...|V| and these IDs to be a topological order of the graph
