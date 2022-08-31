@@ -237,7 +237,6 @@ def solve_instances_safety(graphs, output_file):
         print(f"# graph {g}", file=output_counters)
         paths = mfd['solution']
 
-        cplex_count = 0  # Number of ILP calls per graph
         ilp_count = 0  # Number of ILP calls per graph
 
         for path in paths:
