@@ -198,7 +198,7 @@ def FD_Safety(data,K):
         z = model.addVars(T,vtype=GRB.CONTINUOUS, name="z",lb=0)
         r = model.addVars(R,vtype=GRB.BINARY,name="r")
     
-        model.setObjective(sum(r[p] for p in range(0,len(P))),GRB.MAXIMIZE,)
+        model.setObjective(sum(r[p] for p in range(0,len(P))),GRB.MAXIMIZE)
        
         # flow conservation
         for k in range(0,K):
