@@ -179,7 +179,7 @@ def fd_fixed_size_forbidding_path(data, size, path):
         if model.status == GRB.OPTIMAL:
             data['message'] = 'solved'
             data['runtime'] = model.Runtime
-            data['weigths'], data['solution'] = get_solution(model, data, size)
+            data['weights'], data['solution'] = get_solution(model, data, size)
 
         if model.status == GRB.INFEASIBLE:
             data['message'] = 'unsolved'
@@ -211,7 +211,7 @@ def fd_fixed_size(data, size):
         if model.status == GRB.OPTIMAL:
             data['message'] = 'solved'
             data['runtime'] = model.Runtime
-            data['weigths'], data['solution'] = get_solution(model, data, size)
+            data['weights'], data['solution'] = get_solution(model, data, size)
 
         if model.status == GRB.INFEASIBLE:
             data['message'] = 'unsolved'
@@ -238,6 +238,7 @@ def solve_instances_safety(graphs, output_file):
         paths = mfd['solution']
 
         cplex_count = 0  # Number of ILP calls per graph
+        ilp_count = 0  # Number of ILP calls per graph
 
         for path in paths:
 
@@ -260,7 +261,7 @@ def solve_instances_safety(graphs, output_file):
                         maximal_safe_paths.append(path[first:])
                     break
 
-                cplex_count += 1
+                ilp_count += 1
                 if is_safe(mfd, len(paths), path[first:last + 2]):
                     last = last + 1
                     extending = True
@@ -271,9 +272,10 @@ def solve_instances_safety(graphs, output_file):
                     first = first + 1
 
             # print path
-            nodelist = [item for t in maximal_safe_paths for item in t]
-            print(-1, *sorted(set([item for t in nodelist for item in t])), sep=" ", file=output)
-            print(-1, cplex_count, file=output_counters)
+            for max_safe in maximal_safe_paths:
+                print(-1, *sorted(set([item for t in max_safe for item in t])), sep=" ", file=output)
+            
+            print(-1, ilp_count, file=output_counters)
 
     output.close()
     output_counters.close()
