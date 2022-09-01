@@ -1,6 +1,3 @@
-- Try python ./src/mfd_safety.py -i ./example_inputs/example.graph -o ./example_inputs/example.paths
+- Try python ./src/mfd_safety.py -i ./example_inputs/example.graph -o ./example_inputs/example.safe
 - This code assumes the vertices of the graph to be numbers in 1...|V| and these IDs to be a topological order of the graph
-
-
-
-- Group Testing code added
+- Try  python ./src/mfd_safety_group.py -i ./example_inputs/Group/example.graph -o ./example_inputs/Group/example.unsafe -g ./example_inputs/Group/example.test
