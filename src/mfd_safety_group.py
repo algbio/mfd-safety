@@ -67,7 +67,8 @@ def get_unsafe_paths(model, paths):
     return list()
 
 
-def solve_group_testing(graphs, group_tests, output_file):
+# renamed this function
+def solve_group_testing_example(graphs, group_tests, output_file):
 
     mfds = solve_instances(graphs)
 
@@ -76,12 +77,15 @@ def solve_group_testing(graphs, group_tests, output_file):
     for g, (mfd, group_test) in enumerate(zip(mfds, group_tests)):
 
         output.write(f"# graph {g}\n")
+        print("Paths we are group testing:")
+        print(group_test["paths"])
 
         try:
             model = build_ilp_model_avoiding_multiple_paths(mfd, len(mfd['solution']), group_test['paths'])
             model.optimize()
 
             for unsafe_path in get_unsafe_paths(model, group_test['paths']):
+                print(f"unsafe: {unsafe_path}")
                 output.write(' '.join(map(str, sorted(set([item for t in unsafe_path for item in t])))))
                 output.write('\n')
 
@@ -94,11 +98,50 @@ def solve_group_testing(graphs, group_tests, output_file):
     output.close()
 
 
+def solve_group_testing(graphs, output_file):
+    # goal for now: do a group test for each path with all length 2 subpaths.
+    print("In solve group testing")
+
+    mfds = solve_instances(graphs)
+
+    # okay, we do want unsafe to be written out.
+    output = open(output_file, 'w+')
+
+    for g, mfd in enumerate(mfds):
+
+        # start output file
+        output.write(f"# graph {g}\n")
+
+        # for each path in mfd, test all len 2 subpaths
+        paths = mfd['solution']
+        for path in paths:
+            len2paths = list(zip(path, path[1:]))
+            try:
+                model = build_ilp_model_avoiding_multiple_paths(mfd,
+                                                                len(mfd['solution']),
+                                                                len2paths)
+                model.optimize()
+
+                for unsafe_path in get_unsafe_paths(model, len2paths):
+                    output.write(' '.join(map(str, sorted(set([item for t in unsafe_path for item in t])))))
+                    output.write('\n')
+
+            except gp.GurobiError as e:
+                print(f'Error code {e.errno}: {e}', file=sys.stderr)
+
+            except AttributeError:
+                print('Encountered an attribute error', file=sys.stderr)
+
+
+    output.close()
+
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
         description="""
-        Runs mfd-safety group testing for an input set of paths. 
+        Runs mfd-safety group testing for an input set of paths.
         This script uses the Gurobi ILP solver.
         """,
         formatter_class=argparse.RawTextHelpFormatter
@@ -108,7 +151,7 @@ if __name__ == '__main__':
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
-    requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=True)
+    requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=False)
     requiredNamed.add_argument('-o', '--output', type=str, help='Output filename', required=True)
 
     args = parser.parse_args()
@@ -118,4 +161,5 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
-    solve_group_testing(*read_input(args.input, args.group_test), args.output)
+    # solve_group_testing(*read_input(args.input, args.group_test), args.output)
+    solve_group_testing(read_input_graphs(args.input), args.output)
