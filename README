@@ -1,3 +1,4 @@
 - Try python ./src/mfd_safety.py -i ./example_inputs/example.graph -o ./example_inputs/example.safe
+- To use the optimized version of mfd_safety that uses excess_flow to avoid ilp_calls try ./src/mfd_safety.py -i ./example_inputs/example.graph -o ./example_inputs/example.safeopt -uef
 - This code assumes the vertices of the graph to be numbers in 1...|V| and these IDs to be a topological order of the graph
 - Try  python ./src/mfd_safety_group.py -i ./example_inputs/Group/example.graph -o ./example_inputs/Group/example.unsafe -g ./example_inputs/Group/example.test
