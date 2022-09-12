@@ -208,9 +208,14 @@ def solve_group_testing(graphs, output_file):
 
     mfds = solve_instances(graphs)
     global group_test_ilp_calls
-    group_test_ilp_calls = 0
+
+    output = open(output_file, 'w+')
+    output_counters = open(f"{output_file}.count", 'w+')
 
     for g, mfd in enumerate(mfds):
+        group_test_ilp_calls = 0
+        output.write(f"# graph {g}\n")
+        output_counters.write(f"# graph {g}\n")
 
         # for each path in mfd, test all len 2 subpaths
         paths = mfd['solution']
@@ -241,32 +246,25 @@ def solve_group_testing(graphs, output_file):
                   "peru", "plum", "seagreen"]
         index = 0
 
-        for x in max_safe_paths:
-            print(x)
+        for max_safe in max_safe_paths:
+            output.write('-1 ')
+            output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+            output.write('\n')
             # for drawing
             color = colors[index]
             index += 1
             index = index % len(colors)
-            for edge in x:
+            for edge in max_safe:
                 gv_graph.add_edge(edge[0], edge[1], color=color)
 
-        print(f"num ilp calls: {group_test_ilp_calls}")
+        output_counters.write(f'{group_test_ilp_calls}\n')
 
         # draw
         gv_graph.layout(prog="dot")
         gv_graph.draw(f"graph{g}.pdf")
 
-        """
-        for path in paths:
-            len2paths = list(zip(path, path[1:]))
-            try:
-                safe_paths = group_test_paths(len2paths, mfd)
-            except gp.GurobiError as e:
-                print(f'Error code {e.errno}: {e}', file=sys.stderr)
-
-            except AttributeError:
-                print('Encountered an attribute error', file=sys.stderr)
-                """
+    output.close()
+    output_counters.close()
 
 
 if __name__ == '__main__':
