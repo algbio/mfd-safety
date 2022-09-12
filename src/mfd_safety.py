@@ -241,10 +241,18 @@ def fd_fixed_size(data, size):
     return data
 
 
+def compute_in_out_flows(mfds):
+    for mfd in mfds:
+        vertices = list(mfd['graph'].nodes)
+        mfd['in_flow'] = {v: sum([mfd['flows'][u, v] for u in mfd['adj_in'][v]]) for v in vertices}
+        mfd['out_flow'] = {u: sum([mfd['flows'][u, v] for v in mfd['adj_out'][u]]) for u in vertices}
+
+    return mfds
+
+
 def solve_instances_safety(graphs, output_file):
 
     mfds = solve_instances(graphs)
-
     output = open(output_file, 'w+')
     output_counters = open(f"{output_file}.count", 'w+')
 
@@ -292,7 +300,75 @@ def solve_instances_safety(graphs, output_file):
                 output.write('-1 ')
                 output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
                 output.write('\n')
-            
+
+            output_counters.write(f'{ilp_count}\n')
+
+    output.close()
+    output_counters.close()
+
+
+def solve_instances_safety_using_excess_flow(graphs, output_file):
+
+    mfds = solve_instances(graphs)
+    mfds = compute_in_out_flows(mfds)
+    output = open(output_file, 'w+')
+    output_counters = open(f"{output_file}.count", 'w+')
+
+    for g, mfd in enumerate(mfds):
+
+        output.write(f"# graph {g}\n")
+        output_counters.write(f"# graph {g}\n")
+        paths = mfd['solution']
+
+        ilp_count = 0  # Number of ILP calls per graph
+
+        for path in paths:
+
+            maximal_safe_paths = list()
+            excess_flow = mfd['flows'][path[0]]
+
+            # two-finger algorithm
+            # Invariant: path[first:last+1] (python notation) is safe
+            first = 0
+            last = 0
+            extending = True
+
+            while True:
+
+                if first > last:
+                    last = first
+                    extending = True
+
+                if last >= len(path) - 1:
+                    if extending:
+                        maximal_safe_paths.append(path[first:])
+                    break
+
+                extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + mfd['flows'][path[last+1]]
+                if extended_excess_flow > 0:
+                    last = last + 1
+                    extending = True
+                    excess_flow = extended_excess_flow
+                elif is_safe(mfd, len(paths), path[first:last + 2]):
+                    ilp_count += 1
+                    last = last + 1
+                    extending = True
+                    excess_flow = extended_excess_flow
+                else:
+                    ilp_count += 1
+                    if extending:
+                        maximal_safe_paths.append(path[first:last + 1])
+                        extending = False
+
+                    excess_flow += mfd['in_flow'][path[first][1]] - mfd['flows'][path[first]]
+                    first = first + 1
+
+            # print path
+            for max_safe in maximal_safe_paths:
+                output.write('-1 ')
+                output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+                output.write('\n')
+
             output_counters.write(f'{ilp_count}\n')
 
     output.close()
@@ -312,6 +388,7 @@ if __name__ == '__main__':
                         help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
     parser.add_argument('-t', '--threads', type=int, default=0,
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
+    parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
@@ -324,4 +401,7 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
-    solve_instances_safety(read_input(args.input), args.output)
+    if args.use_excess_flow:
+        solve_instances_safety_using_excess_flow(read_input(args.input), args.output)
+    else:
+        solve_instances_safety(read_input(args.input), args.output)
