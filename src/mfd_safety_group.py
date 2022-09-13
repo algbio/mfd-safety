@@ -5,8 +5,14 @@ import os
 import sys
 import argparse
 import gurobipy as gp
+import time
 from gurobipy import GRB
+import pygraphviz as pgv
 from mfd_safety import read_input_graphs, solve_instances, build_base_ilp_model
+
+
+# gloabl variable: number of ilp calls
+group_test_ilp_calls = 0
 
 
 def get_path(raw_path):
@@ -111,6 +117,8 @@ def group_test_paths(paths, mfd):
     model.optimize()
 
     N = get_unsafe_paths(model, paths)
+    global group_test_ilp_calls
+    group_test_ilp_calls += 1
     if not N:
         return paths
     else:
@@ -159,13 +167,16 @@ def update_core(safe_paths, core):
 
 def get_maximal_safe(core, mfd, max_safe_paths):
     """
-    Input: a core set of paths and graph data (mfd). If the core set is a safe
+    Input: a core set of paths, graph data (mfd), and a (pointer to) a list to
+    hold the maximal safe paths found by the algorithm. If the core set is a safe
     core for the graph, then this returns all maximal safe paths.
-    Output: maximal safe paths generated from the core set.
+    Output: no output, but after completing all recursive calls, the
+    max_safe_paths list will contain all maximal safe paths generated from the core set.
     This implements algorithm 4 from the MFD safety with ILP paper.
     """
     paths = list(set(left_extensions(core) + right_extensions(core)))
     safe_paths = group_test_paths(paths, mfd)
+
     # if the left extension is not safe and the right extension is not safe,
     # then the original path was safe
     for i, path in enumerate(core["paths"]):
@@ -196,8 +207,15 @@ def solve_group_testing(graphs, output_file):
     # goal for now: do a group test for each path with all length 2 subpaths.
 
     mfds = solve_instances(graphs)
+    global group_test_ilp_calls
+
+    output = open(output_file, 'w+')
+    output_counters = open(f"{output_file}.count", 'w+')
 
     for g, mfd in enumerate(mfds):
+        group_test_ilp_calls = 0
+        output.write(f"# graph {g}\n")
+        output_counters.write(f"# graph {g}\n")
 
         # for each path in mfd, test all len 2 subpaths
         paths = mfd['solution']
@@ -215,19 +233,38 @@ def solve_group_testing(graphs, output_file):
 
         max_safe_paths = []
         get_maximal_safe(core, mfd, max_safe_paths)
-        for x in max_safe_paths:
-            print(x)
-        """
-        for path in paths:
-            len2paths = list(zip(path, path[1:]))
-            try:
-                safe_paths = group_test_paths(len2paths, mfd)
-            except gp.GurobiError as e:
-                print(f'Error code {e.errno}: {e}', file=sys.stderr)
 
-            except AttributeError:
-                print('Encountered an attribute error', file=sys.stderr)
-                """
+        # prep to draw the graph
+        gv_graph = pgv.AGraph(strict=False, directed=True, rankdir="LR")
+        graph = (mfd['graph'])
+        for edge in graph.edges():
+            gv_graph.add_edge(edge[0], edge[1])
+
+        # for coloring max safe paths
+        colors = ["red", "green", "blue", "yellow", "orange", "purple",
+                  "lightblue", "lightgreen", "aquamarine", "crimson", "olive",
+                  "peru", "plum", "seagreen"]
+        index = 0
+
+        for max_safe in max_safe_paths:
+            output.write('-1 ')
+            output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+            output.write('\n')
+            # for drawing
+            color = colors[index]
+            index += 1
+            index = index % len(colors)
+            for edge in max_safe:
+                gv_graph.add_edge(edge[0], edge[1], color=color)
+
+        output_counters.write(f'{group_test_ilp_calls}\n')
+
+        # draw
+        gv_graph.layout(prog="dot")
+        gv_graph.draw(f"graph{g}.pdf")
+
+    output.close()
+    output_counters.close()
 
 
 if __name__ == '__main__':
@@ -244,7 +281,7 @@ if __name__ == '__main__':
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
-    requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=False)
+    # requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=False)
     requiredNamed.add_argument('-o', '--output', type=str, help='Output filename', required=True)
 
     args = parser.parse_args()
@@ -255,4 +292,6 @@ if __name__ == '__main__':
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
     # solve_group_testing(*read_input(args.input, args.group_test), args.output)
+    start_time = time.time()
     solve_group_testing(read_input_graphs(args.input), args.output)
+    print(f"wall clock time: {time.time() - start_time}")
