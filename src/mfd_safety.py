@@ -250,6 +250,54 @@ def compute_in_out_flows(mfds):
     return mfds
 
 
+def output_maximal_safe_path(output, max_safe):
+    output.write('-1 ')
+    output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+    output.write('\n')
+
+
+def compute_maximal_safe_paths(mfd):
+
+    ilp_count = 0  # Number of ILP calls per graph
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    for path in paths:
+
+        maximal_safe_paths = list()
+
+        # two-finger algorithm
+        # Invariant: path[first:last+1] (python notation) is safe
+        first = 0
+        last = 0
+        extending = True
+
+        while True:
+
+            if first > last:
+                last = first
+                extending = True
+
+            if last >= len(path) - 1:
+                if extending:
+                    maximal_safe_paths.append((first, len(path)))
+                break
+
+            ilp_count += 1
+            if is_safe(mfd, len(paths), path[first:last + 2]):
+                last = last + 1
+                extending = True
+            else:
+                if extending:
+                    maximal_safe_paths.append((first, last + 1))
+                    extending = False
+                first = first + 1
+
+        max_safe_paths.append(maximal_safe_paths)
+
+    return paths, max_safe_paths, ilp_count
+
+
 def solve_instances_safety(graphs, output_file):
 
     mfds = solve_instances(graphs)
@@ -260,51 +308,70 @@ def solve_instances_safety(graphs, output_file):
 
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
-        paths = mfd['solution']
 
-        ilp_count = 0  # Number of ILP calls per graph
+        paths, max_safe_paths, ilp_count = compute_maximal_safe_paths(mfd)
 
-        for path in paths:
-
-            maximal_safe_paths = list()
-
-            # two-finger algorithm
-            # Invariant: path[first:last+1] (python notation) is safe
-            first = 0
-            last = 0
-            extending = True
-
-            while True:
-
-                if first > last:
-                    last = first
-                    extending = True
-
-                if last >= len(path) - 1:
-                    if extending:
-                        maximal_safe_paths.append(path[first:])
-                    break
-
-                ilp_count += 1
-                if is_safe(mfd, len(paths), path[first:last + 2]):
-                    last = last + 1
-                    extending = True
-                else:
-                    if extending:
-                        maximal_safe_paths.append(path[first:last + 1])
-                        extending = False
-                    first = first + 1
-
+        for path, maximal_safe_paths in zip(paths, max_safe_paths):
             # print path
-            for max_safe in maximal_safe_paths:
-                output.write('-1 ')
-                output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
-                output.write('\n')
+            for i, j in maximal_safe_paths:
+                output_maximal_safe_path(output, path[i:j])
 
-            output_counters.write(f'{ilp_count}\n')
+        output_counters.write(f'{ilp_count}\n')
 
     output.close()
     output_counters.close()
+
+
+def compute_maximal_safe_paths_using_excess_flow(mfd):
+
+    ilp_count = 0  # Number of ILP calls per graph
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    for path in paths:
+
+        maximal_safe_paths = list()
+        excess_flow = mfd['flows'][path[0]]
+
+        # two-finger algorithm
+        # Invariant: path[first:last+1] (python notation) is safe
+        first = 0
+        last = 0
+        extending = True
+
+        while True:
+
+            if first > last:
+                last = first
+                extending = True
+
+            if last >= len(path) - 1:
+                if extending:
+                    maximal_safe_paths.append((first, len(path)))
+                break
+
+            extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + mfd['flows'][path[last + 1]]
+            if extended_excess_flow > 0:
+                last = last + 1
+                extending = True
+                excess_flow = extended_excess_flow
+            elif is_safe(mfd, len(paths), path[first:last + 2]):
+                ilp_count += 1
+                last = last + 1
+                extending = True
+                excess_flow = extended_excess_flow
+            else:
+                ilp_count += 1
+                if extending:
+                    maximal_safe_paths.append((first, last + 1))
+                    extending = False
+
+                excess_flow += mfd['in_flow'][path[first][1]] - mfd['flows'][path[first]]
+                first = first + 1
+
+        max_safe_paths.append(maximal_safe_paths)
+
+    return paths, max_safe_paths, ilp_count
 
 
 def solve_instances_safety_using_excess_flow(graphs, output_file):
@@ -318,58 +385,15 @@ def solve_instances_safety_using_excess_flow(graphs, output_file):
 
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
-        paths = mfd['solution']
 
-        ilp_count = 0  # Number of ILP calls per graph
+        paths, max_safe_paths, ilp_count = compute_maximal_safe_paths_using_excess_flow(mfd)
 
-        for path in paths:
-
-            maximal_safe_paths = list()
-            excess_flow = mfd['flows'][path[0]]
-
-            # two-finger algorithm
-            # Invariant: path[first:last+1] (python notation) is safe
-            first = 0
-            last = 0
-            extending = True
-
-            while True:
-
-                if first > last:
-                    last = first
-                    extending = True
-
-                if last >= len(path) - 1:
-                    if extending:
-                        maximal_safe_paths.append(path[first:])
-                    break
-
-                extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + mfd['flows'][path[last+1]]
-                if extended_excess_flow > 0:
-                    last = last + 1
-                    extending = True
-                    excess_flow = extended_excess_flow
-                elif is_safe(mfd, len(paths), path[first:last + 2]):
-                    ilp_count += 1
-                    last = last + 1
-                    extending = True
-                    excess_flow = extended_excess_flow
-                else:
-                    ilp_count += 1
-                    if extending:
-                        maximal_safe_paths.append(path[first:last + 1])
-                        extending = False
-
-                    excess_flow += mfd['in_flow'][path[first][1]] - mfd['flows'][path[first]]
-                    first = first + 1
-
+        for path, maximal_safe_paths in zip(paths, max_safe_paths):
             # print path
-            for max_safe in maximal_safe_paths:
-                output.write('-1 ')
-                output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
-                output.write('\n')
+            for i, j in maximal_safe_paths:
+                output_maximal_safe_path(output, path[i:j])
 
-            output_counters.write(f'{ilp_count}\n')
+        output_counters.write(f'{ilp_count}\n')
 
     output.close()
     output_counters.close()
