@@ -298,30 +298,6 @@ def compute_maximal_safe_paths(mfd):
     return paths, max_safe_paths, ilp_count
 
 
-def solve_instances_safety(graphs, output_file):
-
-    mfds = solve_instances(graphs)
-    output = open(output_file, 'w+')
-    output_counters = open(f"{output_file}.count", 'w+')
-
-    for g, mfd in enumerate(mfds):
-
-        output.write(f"# graph {g}\n")
-        output_counters.write(f"# graph {g}\n")
-
-        paths, max_safe_paths, ilp_count = compute_maximal_safe_paths(mfd)
-
-        for path, maximal_safe_paths in zip(paths, max_safe_paths):
-            # print path
-            for i, j in maximal_safe_paths:
-                output_maximal_safe_path(output, path[i:j])
-
-        output_counters.write(f'{ilp_count}\n')
-
-    output.close()
-    output_counters.close()
-
-
 def compute_maximal_safe_paths_using_excess_flow(mfd):
 
     ilp_count = 0  # Number of ILP calls per graph
@@ -374,10 +350,25 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths, ilp_count
 
 
-def solve_instances_safety_using_excess_flow(graphs, output_file):
+def get_y_to_v_contractions(graphs):
+    return graphs, dict()
+
+
+def get_expanded_path(path, mapping):
+    return path
+
+
+def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
+
+    if use_y_to_v:
+        graphs, mappings = get_y_to_v_contractions(graphs)
 
     mfds = solve_instances(graphs)
-    mfds = compute_in_out_flows(mfds)
+    compute = compute_maximal_safe_paths
+    if use_excess_flow:
+        mfds = compute_in_out_flows(mfds)
+        compute = compute_maximal_safe_paths_using_excess_flow
+
     output = open(output_file, 'w+')
     output_counters = open(f"{output_file}.count", 'w+')
 
@@ -386,12 +377,15 @@ def solve_instances_safety_using_excess_flow(graphs, output_file):
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
 
-        paths, max_safe_paths, ilp_count = compute_maximal_safe_paths_using_excess_flow(mfd)
+        paths, max_safe_paths, ilp_count = compute(mfd)
 
         for path, maximal_safe_paths in zip(paths, max_safe_paths):
             # print path
             for i, j in maximal_safe_paths:
-                output_maximal_safe_path(output, path[i:j])
+                max_path = path[i:j]
+                if use_y_to_v:
+                    max_path = get_expanded_path(max_path, mappings[g])
+                output_maximal_safe_path(output, max_path)
 
         output_counters.write(f'{ilp_count}\n')
 
@@ -413,6 +407,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--threads', type=int, default=0,
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
+    parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
@@ -425,7 +420,4 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
-    if args.use_excess_flow:
-        solve_instances_safety_using_excess_flow(read_input(args.input), args.output)
-    else:
-        solve_instances_safety(read_input(args.input), args.output)
+    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v)
