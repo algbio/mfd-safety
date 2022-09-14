@@ -7,6 +7,7 @@ import argparse
 import networkx as nx
 import gurobipy as gp
 from gurobipy import GRB
+from collections import deque
 
 
 def get_edge(raw_edge):
@@ -54,54 +55,9 @@ def mfd_algorithm(data):
     return data
 
 
-def solve_instances(graphs):
+def solve_instances(graphs_metadata):
 
-    output = list()
-    for graph in graphs:
-
-        # creation of NetworkX Graph
-        ngraph = nx.DiGraph()
-        ngraph.add_weighted_edges_from(graph['edges'])
-        vertices = ngraph.nodes
-        edges = ngraph.edges
-        weights = {
-            (u, v): ngraph.edges[u, v]['weight'] for u, v in ngraph.edges
-        }
-
-        # creation of adjacency lists
-        adj_in = {
-            v: set(ngraph.pred[v].keys()) for v in vertices
-        }
-        adj_out = {
-            v: set(ngraph.succ[v].keys()) for v in vertices
-        }
-
-        # calculating source, sinks
-        sources = [x for x in vertices if ngraph.in_degree(x) == 0]
-        sinks = [x for x in vertices if ngraph.out_degree(x) == 0]
-
-        # definition of data
-        data = {
-            'edges': edges,
-            'flows': weights,
-            'vertices': vertices,
-            'graph': ngraph,
-            'max_k': len(edges),
-            'weights': list(),
-            'sources': sources,
-            'sinks': sinks,
-            'message': 'unsolved',
-            'solution': list(),
-            'max_flow_value': max(weights.values()),
-            'adj_in': adj_in,
-            'adj_out': adj_out,
-            'min_k': 1,
-            'runtime': 0,
-        }
-
-        output.append(mfd_algorithm(data))
-
-    return output
+    return [mfd_algorithm(graph_metadata) for graph_metadata in graphs_metadata]
 
 
 def build_base_ilp_model(data, size):
@@ -241,15 +197,6 @@ def fd_fixed_size(data, size):
     return data
 
 
-def compute_in_out_flows(mfds):
-    for mfd in mfds:
-        vertices = list(mfd['graph'].nodes)
-        mfd['in_flow'] = {v: sum([mfd['flows'][u, v] for u in mfd['adj_in'][v]]) for v in vertices}
-        mfd['out_flow'] = {u: sum([mfd['flows'][u, v] for v in mfd['adj_out'][u]]) for u in vertices}
-
-    return mfds
-
-
 def output_maximal_safe_path(output, max_safe):
     output.write('-1 ')
     output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
@@ -350,12 +297,113 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths, ilp_count
 
 
+def get_out_tree(ngraph, v, processed):
+
+    # Get root of out_tree
+    root = v
+    while ngraph.in_degree(root) == 1:
+        root = next(ngraph.predecessors(root))
+
+    leaf_edges = list()
+    edges = deque(ngraph.out_edges(root))
+
+    while edges:
+        u, v = edges.popleft()
+        processed[u] = True
+        if ngraph.in_degree(v) != 1:
+            leaf_edges.append((u, v))
+        else:
+            for e in ngraph.out_edges(v):
+                edges.append(e)
+
+    # Filter out uncompressible edges
+    leaf_edges = [(u, v) for (u, v) in leaf_edges if u != root]
+
+    return root, leaf_edges
+
+
+def get_out_trees(ngraph):
+
+    out_trees = dict()
+    processed = {v: ngraph.in_degree(v) != 1 for v in ngraph.nodes}
+    for v in ngraph.nodes:
+        if not processed[v]:
+            root, leaf_edges = get_out_tree(ngraph, v, processed)
+            out_trees[root] = leaf_edges
+    return out_trees
+
+
 def get_y_to_v_contractions(graphs):
-    return graphs, dict()
+    for graph in graphs[:1]:
+        print(graph)
+        ngraph = nx.DiGraph()
+        ngraph.add_weighted_edges_from(graph['edges'])
+        out_trees = get_out_trees(ngraph)
+        print(out_trees)
+
+    return graphs, graphs
 
 
 def get_expanded_path(path, mapping):
     return path
+
+
+def compute_graphs_metadata(graphs, use_excess_flow):
+
+    output = list()
+    for graph in graphs:
+        # creation of NetworkX Graph
+        ngraph = nx.DiGraph()
+        ngraph.add_weighted_edges_from(graph['edges'])
+        vertices = ngraph.nodes
+        edges = ngraph.edges
+        flows = {
+            (u, v): ngraph.edges[u, v]['weight'] for u, v in ngraph.edges
+        }
+
+        # creation of adjacency lists
+        adj_in = {
+            v: set(ngraph.pred[v].keys()) for v in vertices
+        }
+        adj_out = {
+            v: set(ngraph.succ[v].keys()) for v in vertices
+        }
+
+        # calculating source, sinks
+        sources = [x for x in vertices if ngraph.in_degree(x) == 0]
+        sinks = [x for x in vertices if ngraph.out_degree(x) == 0]
+
+        in_flow = None
+        out_flow = None
+        if use_excess_flow:
+            in_flow = {v: sum([flows[u, v] for u in adj_in[v]]) for v in vertices}
+            out_flow = {u: sum([flows[u, v] for v in adj_out[u]]) for u in vertices}
+
+        # definition of data
+        data = {
+            'edges': edges,
+            'flows': flows,
+            'vertices': vertices,
+            'graph': ngraph,
+            'max_k': len(edges),
+            'weights': list(),
+            'sources': sources,
+            'sinks': sinks,
+            'message': 'unsolved',
+            'solution': list(),
+            'max_flow_value': max(flows.values()),
+            'adj_in': adj_in,
+            'adj_out': adj_out,
+            'min_k': 1,
+            'runtime': 0,
+            'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+            'in_flow': in_flow,
+            'out_flow': out_flow
+        }
+
+        output.append(data)
+
+    return output
 
 
 def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
@@ -363,11 +411,9 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
     if use_y_to_v:
         graphs, mappings = get_y_to_v_contractions(graphs)
 
+    graphs = compute_graphs_metadata(graphs, use_excess_flow)
     mfds = solve_instances(graphs)
-    compute = compute_maximal_safe_paths
-    if use_excess_flow:
-        mfds = compute_in_out_flows(mfds)
-        compute = compute_maximal_safe_paths_using_excess_flow
+
 
     output = open(output_file, 'w+')
     output_counters = open(f"{output_file}.count", 'w+')
@@ -377,7 +423,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
 
-        paths, max_safe_paths, ilp_count = compute(mfd)
+        paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
 
         for path, maximal_safe_paths in zip(paths, max_safe_paths):
             # print path
