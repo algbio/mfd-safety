@@ -46,10 +46,10 @@ def read_input(graph_file):
 
 def mfd_algorithm(data):
 
-    data['message'] = "unsolved"
+    data['message'] = 'unsolved'
     for i in range(1, len(data['graph'].edges) + 1):
         data = fd_fixed_size(data, i)
-        if data['message'] == "solved":
+        if data['message'] == 'solved':
             return data
 
     return data
@@ -72,13 +72,13 @@ def build_base_ilp_model(data, size):
     SC = list(range(size))
 
     # Create a new model
-    model = gp.Model("MFD")
+    model = gp.Model('MFD')
     model.Params.LogToConsole = 0
 
     # Create variables
-    x = model.addVars(T, vtype=GRB.BINARY, name="x")
-    w = model.addVars(SC, vtype=GRB.INTEGER, name="w", lb=0)
-    z = model.addVars(T, vtype=GRB.CONTINUOUS, name="z", lb=0)
+    x = model.addVars(T, vtype=GRB.BINARY, name='x')
+    w = model.addVars(SC, vtype=GRB.INTEGER, name='w', lb=0)
+    z = model.addVars(T, vtype=GRB.CONTINUOUS, name='z', lb=0)
 
     model.setObjective(GRB.MINIMIZE)
 
@@ -401,12 +401,12 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
     mfds = solve_instances(graphs)
 
     output = open(output_file, 'w+')
-    output_counters = open(f"{output_file}.count", 'w+')
+    output_counters = open(f'{output_file}.count', 'w+')
 
     for g, mfd in enumerate(mfds):
 
-        output.write(f"# graph {g}\n")
-        output_counters.write(f"# graph {g}\n")
+        output.write(f'# graph {g}\n')
+        output_counters.write(f'# graph {g}\n')
 
         paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
 
@@ -427,10 +427,10 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
-        description="""
+        description='''
         Computes maximal safe paths for Minimum Flow Decomposition. 
         This script uses the Gurobi ILP solver.
-        """,
+        ''',
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument('-wt', '--weighttype', type=str, default='int+',
@@ -449,6 +449,6 @@ if __name__ == '__main__':
     threads = args.threads
     if threads == 0:
         threads = os.cpu_count()
-    print(f"INFO: Using {threads} threads for the Gurobi solver")
+    print(f'INFO: Using {threads} threads for the Gurobi solver')
 
     solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v)
