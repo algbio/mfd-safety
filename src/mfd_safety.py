@@ -46,8 +46,8 @@ def read_input(graph_file):
 
 def mfd_algorithm(data):
 
-    data['message'] == "unsolved"
-    for i in range(data['min_k'], data['max_k'] + 1):
+    data['message'] = "unsolved"
+    for i in range(1, len(data['graph'].edges) + 1):
         data = fd_fixed_size(data, i)
         if data['message'] == "solved":
             return data
@@ -62,17 +62,13 @@ def solve_instances(graphs_metadata):
 
 def build_base_ilp_model(data, size):
 
-    vertices = data['vertices']
-    edges = data['edges']
-    flow = data['flows']
+    graph = data['graph']
     max_flow_value = data['max_flow_value']
     sources = data['sources']
     sinks = data['sinks']
-    adj_in = data['adj_in']
-    adj_out = data['adj_out']
 
     # create extra sets
-    T = [(u, v, k) for (u, v) in edges for k in range(size)]
+    T = [(u, v, k) for (u, v) in graph.edges for k in range(size)]
     SC = list(range(size))
 
     # Create a new model
@@ -88,20 +84,20 @@ def build_base_ilp_model(data, size):
 
     # flow conservation
     for k in range(size):
-        for v in vertices:
+        for v in graph.nodes:
             if v in sources:
-                model.addConstr(sum(x[v, w, k] for w in adj_out[v]) == 1)
+                model.addConstr(sum(x[v, w, k] for w in graph.successors(v)) == 1)
             if v in sinks:
-                model.addConstr(sum(x[u, v, k] for u in adj_in[v]) == 1)
+                model.addConstr(sum(x[u, v, k] for u in graph.predecessors(v)) == 1)
             if v not in sources and v not in sinks:
-                model.addConstr(sum(x[v, w, k] for w in adj_out[v]) - sum(x[u, v, k] for u in adj_in[v]) == 0)
+                model.addConstr(sum(x[v, w, k] for w in graph.successors(v)) - sum(x[u, v, k] for u in graph.predecessors(v)) == 0)
 
     # flow balance
-    for (u, v) in edges:
-        model.addConstr(flow[u, v] == sum(z[u, v, k] for k in range(size)))
+    for (u, v, f) in graph.edges(data='flow'):
+        model.addConstr(f == sum(z[u, v, k] for k in range(size)))
 
     # linearization
-    for (u, v) in edges:
+    for (u, v) in graph.edges:
         for k in range(size):
             model.addConstr(z[u, v, k] <= max_flow_value * x[u, v, k])
             model.addConstr(w[k] - (1 - x[u, v, k]) * max_flow_value <= z[u, v, k])
@@ -123,8 +119,10 @@ def build_ilp_model_avoiding_path(data, size, path):
 
 def get_solution(model, data, size):
 
+    data['weights'], data['solution'] = list(), list()
+
     if model.status == GRB.OPTIMAL:
-        edges = data['edges']
+        edges = data['graph'].edges
         T = [(u, v, k) for (u, v) in edges for k in range(size)]
 
         w_sol = [0] * len(range(size))
@@ -150,6 +148,7 @@ def update_status(data, model):
 
     if model.status == GRB.INFEASIBLE:
         data['message'] = 'unsolved'
+        data['runtime'] = 0
 
     return data
 
@@ -245,6 +244,10 @@ def compute_maximal_safe_paths(mfd):
     return paths, max_safe_paths, ilp_count
 
 
+def get_flow(e, mfd):
+    return mfd['graph'].edges[e]['flow']
+
+
 def compute_maximal_safe_paths_using_excess_flow(mfd):
 
     ilp_count = 0  # Number of ILP calls per graph
@@ -254,7 +257,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     for path in paths:
 
         maximal_safe_paths = list()
-        excess_flow = mfd['flows'][path[0]]
+        excess_flow = get_flow(path[0], mfd)
 
         # two-finger algorithm
         # Invariant: path[first:last+1] (python notation) is safe
@@ -273,7 +276,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
                     maximal_safe_paths.append((first, len(path)))
                 break
 
-            extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + mfd['flows'][path[last + 1]]
+            extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
             if extended_excess_flow > 0:
                 last = last + 1
                 extending = True
@@ -289,7 +292,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
                     maximal_safe_paths.append((first, last + 1))
                     extending = False
 
-                excess_flow += mfd['in_flow'][path[first][1]] - mfd['flows'][path[first]]
+                excess_flow += mfd['in_flow'][path[first][1]] - get_flow(path[first], mfd)
                 first = first + 1
 
         max_safe_paths.append(maximal_safe_paths)
@@ -306,6 +309,7 @@ def get_out_tree(ngraph, v, processed):
 
     leaf_edges = list()
     edges = deque(ngraph.out_edges(root))
+
 
     while edges:
         u, v = edges.popleft()
@@ -333,72 +337,57 @@ def get_out_trees(ngraph):
     return out_trees
 
 
-def get_y_to_v_contractions(graphs):
-    for graph in graphs[:1]:
-        print(graph)
-        ngraph = nx.DiGraph()
-        ngraph.add_weighted_edges_from(graph['edges'])
-        out_trees = get_out_trees(ngraph)
-        print(out_trees)
+def get_y_to_v_contraction(ngraph):
 
-    return graphs, graphs
+    out_trees = get_out_trees(ngraph)
+
+    mngraph = nx.MultiDiGraph()
+    for u, v in ngraph.edges():
+        if ngraph.in_degree(v) != 1 and ngraph.in_degree(u) != 1:
+            mngraph.add_edge(u, v, flow=ngraph.edges[u, v]['flow'], pred=u)
+
+    for root, leaf_edges in out_trees.items():
+        for u, v in leaf_edges:
+            mngraph.add_edge(root, v, flow=ngraph.edges[u, v]['flow'], pred=u)
+
+    return mngraph
 
 
-def get_expanded_path(path, mapping):
+def get_expanded_path(path, mfd):
     return path
 
 
-def compute_graphs_metadata(graphs, use_excess_flow):
+def compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v):
 
     output = list()
     for graph in graphs:
+
         # creation of NetworkX Graph
         ngraph = nx.DiGraph()
-        ngraph.add_weighted_edges_from(graph['edges'])
-        vertices = ngraph.nodes
-        edges = ngraph.edges
-        flows = {
-            (u, v): ngraph.edges[u, v]['weight'] for u, v in ngraph.edges
-        }
-
-        # creation of adjacency lists
-        adj_in = {
-            v: set(ngraph.pred[v].keys()) for v in vertices
-        }
-        adj_out = {
-            v: set(ngraph.succ[v].keys()) for v in vertices
-        }
+        ngraph.add_weighted_edges_from(graph['edges'], weight='flow')
+        if use_y_to_v:
+            original = ngraph
+            ngraph = get_y_to_v_contraction(ngraph)
+            ngraph = original  # Still not working with the multigraph
 
         # calculating source, sinks
-        sources = [x for x in vertices if ngraph.in_degree(x) == 0]
-        sinks = [x for x in vertices if ngraph.out_degree(x) == 0]
+        sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
+        sinks = [x for x in ngraph.nodes if ngraph.out_degree(x) == 0]
 
-        in_flow = None
-        out_flow = None
         if use_excess_flow:
-            in_flow = {v: sum([flows[u, v] for u in adj_in[v]]) for v in vertices}
-            out_flow = {u: sum([flows[u, v] for v in adj_out[u]]) for u in vertices}
+            in_flow = {v: sum([f for u, v, f in ngraph.in_edges(v, data='flow')]) for v in ngraph.nodes}
+            out_flow = {u: sum([f for u, v, f in ngraph.out_edges(u, data='flow')]) for u in ngraph.nodes}
 
         # definition of data
         data = {
-            'edges': edges,
-            'flows': flows,
-            'vertices': vertices,
             'graph': ngraph,
-            'max_k': len(edges),
-            'weights': list(),
             'sources': sources,
             'sinks': sinks,
-            'message': 'unsolved',
-            'solution': list(),
-            'max_flow_value': max(flows.values()),
-            'adj_in': adj_in,
-            'adj_out': adj_out,
-            'min_k': 1,
-            'runtime': 0,
+            'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1],
             'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
-            'in_flow': in_flow,
-            'out_flow': out_flow
+            'in_flow': in_flow if use_excess_flow else None,
+            'out_flow': out_flow if use_excess_flow else None,
+            'original': original if use_y_to_v else None
         }
 
         output.append(data)
@@ -408,12 +397,8 @@ def compute_graphs_metadata(graphs, use_excess_flow):
 
 def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
 
-    if use_y_to_v:
-        graphs, mappings = get_y_to_v_contractions(graphs)
-
-    graphs = compute_graphs_metadata(graphs, use_excess_flow)
+    graphs = compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v)
     mfds = solve_instances(graphs)
-
 
     output = open(output_file, 'w+')
     output_counters = open(f"{output_file}.count", 'w+')
@@ -430,7 +415,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
             for i, j in maximal_safe_paths:
                 max_path = path[i:j]
                 if use_y_to_v:
-                    max_path = get_expanded_path(max_path, mappings[g])
+                    max_path = get_expanded_path(max_path, mfd)
                 output_maximal_safe_path(output, max_path)
 
         output_counters.write(f'{ilp_count}\n')
