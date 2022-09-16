@@ -204,7 +204,6 @@ def get_maximal_safe(core, mfd, max_safe_paths):
 
 
 def solve_group_testing(graphs, output_file):
-    # goal for now: do a group test for each path with all length 2 subpaths.
 
     mfds = solve_instances(graphs)
     global group_test_ilp_calls
@@ -217,7 +216,6 @@ def solve_group_testing(graphs, output_file):
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
 
-        # for each path in mfd, test all len 2 subpaths
         paths = mfd['solution']
         # core is a dictionary associating a bunch of subpaths (identified by
         # their l and r) to each path. to start, core is just length 1
@@ -291,7 +289,9 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
+    # old function
     # solve_group_testing(*read_input(args.input, args.group_test), args.output)
     start_time = time.time()
+    # new function implementing algorithm 4 from paper
     solve_group_testing(read_input_graphs(args.input), args.output)
     print(f"wall clock time: {time.time() - start_time}")
