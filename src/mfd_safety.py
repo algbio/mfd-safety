@@ -60,6 +60,31 @@ def solve_instances(graphs_metadata):
     return [mfd_algorithm(graph_metadata) for graph_metadata in graphs_metadata]
 
 
+def get_in_edges(graph, v):
+    if type(graph) == nx.DiGraph:
+        return [(u, v, 0) for u, _ in graph.in_edges(v)]
+    return graph.in_edges(v, keys=True)
+
+
+def get_out_edges(graph, u):
+    if type(graph) == nx.DiGraph:
+        return [(u, v, 0) for _, v in graph.out_edges(u)]
+    return graph.out_edges(u, keys=True)
+
+
+def get_multi_edges(graph, flow=False):
+    if type(graph) == nx.DiGraph:
+        if flow:
+            return [(u, v, 0, f) for u, v, f in graph.edges(data='flow')]
+        else:
+            return [(u, v, 0) for u, v in graph.edges]
+    else:
+        if flow:
+            return graph.edges(keys=True, data='flow')
+        else:
+            return graph.edges(keys=True)
+
+
 def build_base_ilp_model(data, size):
 
     graph = data['graph']
@@ -68,7 +93,7 @@ def build_base_ilp_model(data, size):
     sinks = data['sinks']
 
     # create extra sets
-    T = [(u, v, k) for (u, v) in graph.edges for k in range(size)]
+    T = [(u, v, i, k) for (u, v, i) in get_multi_edges(graph) for k in range(size)]
     SC = list(range(size))
 
     # Create a new model
@@ -80,28 +105,26 @@ def build_base_ilp_model(data, size):
     w = model.addVars(SC, vtype=GRB.INTEGER, name='w', lb=0)
     z = model.addVars(T, vtype=GRB.CONTINUOUS, name='z', lb=0)
 
-    model.setObjective(GRB.MINIMIZE)
-
     # flow conservation
     for k in range(size):
         for v in graph.nodes:
             if v in sources:
-                model.addConstr(sum(x[v, w, k] for w in graph.successors(v)) == 1)
+                model.addConstr(sum(x[v, w, i, k] for _, w, i in get_out_edges(graph, v)) == 1)
             if v in sinks:
-                model.addConstr(sum(x[u, v, k] for u in graph.predecessors(v)) == 1)
+                model.addConstr(sum(x[u, v, i, k] for u, _, i in get_in_edges(graph, v)) == 1)
             if v not in sources and v not in sinks:
-                model.addConstr(sum(x[v, w, k] for w in graph.successors(v)) - sum(x[u, v, k] for u in graph.predecessors(v)) == 0)
+                model.addConstr(sum(x[v, w, i, k] for _, w, i in get_out_edges(graph, v)) - sum(x[u, v, i, k] for u, _, i in get_in_edges(graph, v)) == 0)
 
     # flow balance
-    for (u, v, f) in graph.edges(data='flow'):
-        model.addConstr(f == sum(z[u, v, k] for k in range(size)))
+    for (u, v, i, f) in get_multi_edges(graph, flow=True):
+        model.addConstr(f == sum(z[u, v, i, k] for k in range(size)))
 
     # linearization
-    for (u, v) in graph.edges:
+    for (u, v, i) in get_multi_edges(graph):
         for k in range(size):
-            model.addConstr(z[u, v, k] <= max_flow_value * x[u, v, k])
-            model.addConstr(w[k] - (1 - x[u, v, k]) * max_flow_value <= z[u, v, k])
-            model.addConstr(z[u, v, k] <= w[k])
+            model.addConstr(z[u, v, i, k] <= max_flow_value * x[u, v, i, k])
+            model.addConstr(w[k] - (1 - x[u, v, i, k]) * max_flow_value <= z[u, v, i, k])
+            model.addConstr(z[u, v, i, k] <= w[k])
 
     return model, x, w, z
 
@@ -112,7 +135,7 @@ def build_ilp_model_avoiding_path(data, size, path):
 
     # safety test constraint
     for k in range(size):
-        model.addConstr(sum(x[u, v, k] for (u, v) in path) <= len(path) - 1)
+        model.addConstr(sum(x[u, v, i, k] for (u, v, i) in path) <= len(path) - 1)
 
     return model
 
@@ -122,16 +145,16 @@ def get_solution(model, data, size):
     data['weights'], data['solution'] = list(), list()
 
     if model.status == GRB.OPTIMAL:
-        edges = data['graph'].edges
-        T = [(u, v, k) for (u, v) in edges for k in range(size)]
+        graph = data['graph']
+        T = [(u, v, i, k) for (u, v, i) in get_multi_edges(graph) for k in range(size)]
 
         w_sol = [0] * len(range(size))
         paths = [list() for _ in range(size)]
         for k in range(size):
             w_sol[k] = model.getVarByName(f'w[{k}]').x
-        for (u, v, k) in T:
-            if model.getVarByName(f'x[{u},{v},{k}]').x == 1:
-                paths[k].append((u, v))
+        for (u, v, i, k) in T:
+            if model.getVarByName(f'x[{u},{v},{i},{k}]').x == 1:
+                paths[k].append((u, v, i))
         for k in range(len(paths)):
             paths[k] = sorted(paths[k])
 
@@ -198,7 +221,7 @@ def fd_fixed_size(data, size):
 
 def output_maximal_safe_path(output, max_safe):
     output.write('-1 ')
-    output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+    output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t[:-1]])))))
     output.write('\n')
 
 
@@ -245,7 +268,12 @@ def compute_maximal_safe_paths(mfd):
 
 
 def get_flow(e, mfd):
-    return mfd['graph'].edges[e]['flow']
+
+    graph = mfd['graph']
+    if type(graph) == nx.DiGraph:
+        return graph.edges[e[0], e[1]]['flow']
+    else:
+        return graph.edges[e]['flow']
 
 
 def compute_maximal_safe_paths_using_excess_flow(mfd):
@@ -310,7 +338,6 @@ def get_out_tree(ngraph, v, processed):
     leaf_edges = list()
     edges = deque(ngraph.out_edges(root))
 
-
     while edges:
         u, v = edges.popleft()
         processed[u] = True
@@ -326,6 +353,31 @@ def get_out_tree(ngraph, v, processed):
     return root, leaf_edges
 
 
+def get_in_tree(ngraph, v, processed):
+
+    # Get root of in_tree
+    root = v
+    while ngraph.out_degree(root) == 1:
+        root = next(ngraph.successors(root))
+
+    leaf_edges = list()
+    edges = deque(ngraph.in_edges(root, keys=True))
+
+    while edges:
+        u, v, i = edges.popleft()
+        processed[v] = True
+        if ngraph.out_degree(u) != 1:
+            leaf_edges.append((u, v, i))
+        else:
+            for e in ngraph.in_edges(u, keys=True):
+                edges.append(e)
+
+    # Filter out uncompressible edges
+    leaf_edges = [(u, v, i) for (u, v, i) in leaf_edges if v != root]
+
+    return root, leaf_edges
+
+
 def get_out_trees(ngraph):
 
     out_trees = dict()
@@ -337,24 +389,76 @@ def get_out_trees(ngraph):
     return out_trees
 
 
+def get_in_trees(ngraph):
+
+    in_trees = dict()
+    processed = {v: ngraph.out_degree(v) != 1 for v in ngraph.nodes}
+    for v in ngraph.nodes:
+        if not processed[v]:
+            root, leaf_edges = get_in_tree(ngraph, v, processed)
+            in_trees[root] = leaf_edges
+    return in_trees
+
+
 def get_y_to_v_contraction(ngraph):
 
     out_trees = get_out_trees(ngraph)
 
-    mngraph = nx.MultiDiGraph()
+    mngraph_out_contraction = nx.MultiDiGraph()
     for u, v in ngraph.edges():
         if ngraph.in_degree(v) != 1 and ngraph.in_degree(u) != 1:
-            mngraph.add_edge(u, v, flow=ngraph.edges[u, v]['flow'], pred=u)
+            mngraph_out_contraction.add_edge(u, v, flow=ngraph.edges[u, v]['flow'], pred=u)
 
     for root, leaf_edges in out_trees.items():
         for u, v in leaf_edges:
-            mngraph.add_edge(root, v, flow=ngraph.edges[u, v]['flow'], pred=u)
+            mngraph_out_contraction.add_edge(root, v, flow=ngraph.edges[u, v]['flow'], pred=u)
 
-    return mngraph
+    in_trees = get_in_trees(mngraph_out_contraction)
+
+    mngraph_in_contraction = nx.MultiDiGraph()
+    for u, v, i in mngraph_out_contraction.edges(keys=True):
+        if mngraph_out_contraction.out_degree(u) != 1 and mngraph_out_contraction.out_degree(v) != 1:
+            mngraph_in_contraction.add_edge(u, v, flow=mngraph_out_contraction.edges[u, v, i]['flow'], succ=(v, i))
+
+    for root, leaf_edges in in_trees.items():
+        for u, v, i in leaf_edges:
+            mngraph_in_contraction.add_edge(u, root, flow=mngraph_out_contraction.edges[u, v, i]['flow'], succ=(v, i))
+
+    return mngraph_out_contraction, mngraph_in_contraction
 
 
 def get_expanded_path(path, mfd):
-    return path
+
+    graph = mfd['graph']
+    original_graph, out_contraction_graph = mfd['mapping']
+    out_contraction_path = list()
+
+    for u, v, i in path:
+        root = v
+        v, i = graph.edges[u, v, i]['succ']
+
+        expanded_edge = list()
+        while v != root:
+            expanded_edge.append((u, v, i))
+            u, v, i = list(get_out_edges(out_contraction_graph, v))[0]
+
+        expanded_edge.append((u, v, i))
+        out_contraction_path += list(expanded_edge)
+
+    original_path = list()
+
+    for u, v, i in out_contraction_path:
+        root = u
+        u = out_contraction_graph.edges[u, v, i]['pred']
+        expanded_edge = list()
+        while u != root:
+            expanded_edge.append((u, v, 0))
+            v = u
+            u = next(original_graph.predecessors(v))
+        expanded_edge.append((u, v, 0))
+        original_path += list(reversed(expanded_edge))
+
+    return original_path
 
 
 def compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v):
@@ -367,8 +471,9 @@ def compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v):
         ngraph.add_weighted_edges_from(graph['edges'], weight='flow')
         if use_y_to_v:
             original = ngraph
-            ngraph = get_y_to_v_contraction(ngraph)
-            ngraph = original  # Still not working with the multigraph
+            out_contraction, ngraph = get_y_to_v_contraction(ngraph)
+            mapping = (original, out_contraction)
+            print(f'INFO: Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
 
         # calculating source, sinks
         sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
@@ -387,7 +492,7 @@ def compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v):
             'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
             'in_flow': in_flow if use_excess_flow else None,
             'out_flow': out_flow if use_excess_flow else None,
-            'original': original if use_y_to_v else None
+            'mapping': mapping if use_y_to_v else None
         }
 
         output.append(data)
