@@ -124,7 +124,7 @@ def group_test_paths(paths, mfd):
         return paths
     else:
         # call on paths \ N
-        return group_test_paths(list(set(paths).difference(set(N))), mfd)
+        return group_test_paths(list(set(paths) - set(N)), mfd)
 
 
 def left_extensions(core):
@@ -206,9 +206,64 @@ def get_maximal_safe(core, mfd, max_safe_paths):
         get_maximal_safe(core, mfd, max_safe_paths)
 
 
-def solve_group_testing(graphs, output_file, uef, uy2v):
+def bottom_up(mfd, paths):
+    """
+    Find all maximal safe paths using a bottom-up approach with group testing.
+    That is, start from small paths (length one paths) and try to extend them
+    left and right.
+    """
 
-    graphs = compute_graphs_metadata(graphs, uef, uy2v)
+    # core is a dictionary associating a bunch of subpaths (identified by
+    # their l and r) to each path. to start, core is just length 1
+    # subpaths (single edges).
+    # e.g., if the 0th path is [(0,1),(1,11),(11,3),(3,12)], then
+    # core[0] = [(0,0), (1,1), (2,2), (3,3)]
+    core = dict()
+    core["paths"] = paths
+    for i, path in enumerate(paths):
+        # core[i] = all length 1 path indices for ith path
+        core[i] = list(zip(list(range(len(path))),
+                           list(range(len(path)))))
+
+    max_safe_paths = []
+    get_maximal_safe(core, mfd, max_safe_paths)
+    return max_safe_paths
+
+
+def split_all(paths):
+    """
+    replace each path in paths with path[1:m],path[m:len(path)] where m is the
+    floor of half the length of the path.
+    """
+    new_paths = []
+    for path in paths:
+        new_paths.append(path[:int(len(path)/2)])
+        new_paths.append(path[int(len(path)/2):])
+    return new_paths
+
+
+def top_down(mfd, paths):
+    """
+    Find all maximal safe paths using a top-down appraoch with group testing.
+    That is, start from long paths (a mfd solution) and try to split them in
+    half.
+    """
+    # databases of safe and unsafe paths
+    D_safe = []
+    D_unsafe = []
+    paths = [tuple(x) for x in paths]
+    while paths:
+        S = group_test_paths(paths, mfd)
+        unsafe = list(set(paths) - set(S))
+        D_safe.extend(S)
+        D_unsafe.extend(unsafe)
+        paths = split_all(unsafe)
+    return D_safe
+
+
+def solve_group_testing(graphs, output_file, uef, use_y_to_v, alg):
+
+    graphs = compute_graphs_metadata(graphs, uef, use_y_to_v)
     mfds = solve_instances(graphs)
     global group_test_ilp_calls
 
@@ -219,22 +274,13 @@ def solve_group_testing(graphs, output_file, uef, uy2v):
         group_test_ilp_calls = 0
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
-
         paths = mfd['solution']
-        # core is a dictionary associating a bunch of subpaths (identified by
-        # their l and r) to each path. to start, core is just length 1
-        # subpaths (single edges).
-        # e.g., if the 0th path is [(0,1),(1,11),(11,3),(3,12)], then
-        # core[0] = [(0,0), (1,1), (2,2), (3,3)]
-        core = dict()
-        core["paths"] = paths
-        for i, path in enumerate(paths):
-            # core[i] = all length 1 path indices for ith path
-            core[i] = list(zip(list(range(len(path))),
-                               list(range(len(path)))))
 
-        max_safe_paths = []
-        get_maximal_safe(core, mfd, max_safe_paths)
+        if alg == "bottom_up":
+            max_safe_paths = bottom_up(mfd, paths)
+        if alg == "top_down":
+            # todo
+            max_safe_paths = top_down(mfd, paths)
 
         # prep to draw the graph
         gv_graph = pgv.AGraph(strict=False, directed=True, rankdir="LR")
@@ -253,6 +299,7 @@ def solve_group_testing(graphs, output_file, uef, uy2v):
             output.write(' '.join(map(str, sorted(set([item for t in max_safe
                                                        for item in t[:-1]])))))
             output.write('\n')
+
             # for drawing
             color = colors[index]
             index += 1
@@ -290,6 +337,8 @@ if __name__ == '__main__':
 
     # requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=False)
     requiredNamed.add_argument('-o', '--output', type=str, help='Output filename', required=True)
+    requiredNamed.add_argument('-a', '--algorithm', type=str, help='Group testing algorithm',
+                               required=True)
 
     args = parser.parse_args()
 
@@ -298,9 +347,7 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
-    # solve_group_testing(*read_input(args.input, args.group_test), args.output)
     start_time = time.time()
-    # new function implementing algorithm 4 from paper
     solve_group_testing(read_input_graphs(args.input), args.output,
-                        args.use_excess_flow, args.use_y_to_v)
+                        args.use_excess_flow, args.use_y_to_v, args.algorithm)
     print(f"wall clock time: {time.time() - start_time}")
