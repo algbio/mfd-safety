@@ -8,7 +8,7 @@ import gurobipy as gp
 import time
 from gurobipy import GRB
 import pygraphviz as pgv
-from mfd_safety import read_input_graphs, solve_instances, build_base_ilp_model
+from mfd_safety import read_input_graphs, solve_instances, build_base_ilp_model, compute_graphs_metadata
 
 
 # gloabl variable: number of ilp calls
@@ -60,7 +60,8 @@ def build_ilp_model_avoiding_multiple_paths(data, size, paths):
     # group testing constraint
     for p, path in enumerate(paths):
         for k in range(size):
-            model.addConstr(sum(x[i, j, k] for (i, j) in path) <= len(path) - r[p])
+            # changed from model.addConstr(sum(x[i, j, k] for (i, j) in path) <= len(path) - r[p])
+            model.addConstr(sum(x[u, v, i, k] for (u, v, i) in path) <= len(path) - r[p])
 
     return model
 
@@ -174,6 +175,10 @@ def get_maximal_safe(core, mfd, max_safe_paths):
     max_safe_paths list will contain all maximal safe paths generated from the core set.
     This implements algorithm 4 from the MFD safety with ILP paper.
     """
+    # print("core is:")
+    # for i, p in enumerate(core["paths"]):
+    #     print(core[i])
+
     paths = list(set(left_extensions(core) + right_extensions(core)))
     safe_paths = group_test_paths(paths, mfd)
 
@@ -188,11 +193,9 @@ def get_maximal_safe(core, mfd, max_safe_paths):
             left_unsafe = tuple(path[left - 1: right + 1]) not in safe_paths
             right_unsafe = tuple(path[left: right + 2]) not in safe_paths
             if left_unsafe and right_unsafe:
+                # print(f"   ! path {path[left:right + 1]} is safe")
                 max_safe_paths.append(path[left:right + 1])
     update_core(safe_paths, core)
-    # print("new core is:")
-    # for i, p in enumerate(core["paths"]):
-    #     print(core[i])
 
     # count how many core sets are left
     total_core = 0
@@ -203,8 +206,9 @@ def get_maximal_safe(core, mfd, max_safe_paths):
         get_maximal_safe(core, mfd, max_safe_paths)
 
 
-def solve_group_testing(graphs, output_file):
+def solve_group_testing(graphs, output_file, uef, uy2v):
 
+    graphs = compute_graphs_metadata(graphs, uef, uy2v)
     mfds = solve_instances(graphs)
     global group_test_ilp_calls
 
@@ -246,7 +250,8 @@ def solve_group_testing(graphs, output_file):
 
         for max_safe in max_safe_paths:
             output.write('-1 ')
-            output.write(' '.join(map(str, sorted(set([item for t in max_safe for item in t])))))
+            output.write(' '.join(map(str, sorted(set([item for t in max_safe
+                                                       for item in t[:-1]])))))
             output.write('\n')
             # for drawing
             color = colors[index]
@@ -274,11 +279,15 @@ if __name__ == '__main__':
         """,
         formatter_class=argparse.RawTextHelpFormatter
         )
-    parser.add_argument('-wt', '--weighttype', type=str, default='int+', help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
+    parser.add_argument('-wt', '--weighttype', type=str, default='int+',
+                        help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
     parser.add_argument('-t', '--threads', type=int, default=0, help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
+    parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
+    parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
+
     # requiredNamed.add_argument('-g', '--group-test', type=str, help='Input (group tests) filename', required=False)
     requiredNamed.add_argument('-o', '--output', type=str, help='Output filename', required=True)
 
@@ -289,9 +298,9 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f"INFO: Using {threads} threads for the Gurobi solver")
 
-    # old function
     # solve_group_testing(*read_input(args.input, args.group_test), args.output)
     start_time = time.time()
     # new function implementing algorithm 4 from paper
-    solve_group_testing(read_input_graphs(args.input), args.output)
+    solve_group_testing(read_input_graphs(args.input), args.output,
+                        args.use_excess_flow, args.use_y_to_v)
     print(f"wall clock time: {time.time() - start_time}")
