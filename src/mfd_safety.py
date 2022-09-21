@@ -323,7 +323,9 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths, ilp_count
 
 
-def get_out_tree(ngraph, v, processed):
+def get_out_tree(ngraph, v, processed, compressed):
+
+    comp = {e: compressed[e] for e in compressed}
 
     # Get root of out_tree
     root = v
@@ -336,19 +338,24 @@ def get_out_tree(ngraph, v, processed):
     while edges:
         u, v = edges.popleft()
         processed[u] = True
-        if ngraph.in_degree(v) != 1:
+        comp[u, v] = True
+        if ngraph.in_degree(v) > 1 or ngraph.out_degree(v) == 0:
             leaf_edges.append((u, v))
         else:
             for e in ngraph.out_edges(v):
                 edges.append(e)
 
     # Filter out uncompressible edges
+    for e in [(u, v) for (u, v) in leaf_edges if u == root]:
+        comp[e] = compressed[e]
     leaf_edges = [(u, v) for (u, v) in leaf_edges if u != root]
 
-    return root, leaf_edges
+    return root, leaf_edges, processed, comp
 
 
-def get_in_tree(ngraph, v, processed):
+def get_in_tree(ngraph, v, processed, compressed):
+
+    comp = {e: compressed[e] for e in compressed}
 
     # Get root of in_tree
     root = v
@@ -361,58 +368,65 @@ def get_in_tree(ngraph, v, processed):
     while edges:
         u, v, i = edges.popleft()
         processed[v] = True
-        if ngraph.out_degree(u) != 1:
+        comp[u, v, i] = True
+        if ngraph.out_degree(u) > 1 or ngraph.in_degree(u) == 0:
             leaf_edges.append((u, v, i))
         else:
             for e in ngraph.in_edges(u, keys=True):
                 edges.append(e)
 
     # Filter out uncompressible edges
+    for e in [(u, v, i) for (u, v, i) in leaf_edges if v == root]:
+        comp[e] = compressed[e]
     leaf_edges = [(u, v, i) for (u, v, i) in leaf_edges if v != root]
 
-    return root, leaf_edges
+    return root, leaf_edges, processed, comp
 
 
 def get_out_trees(ngraph):
 
     out_trees = dict()
+    compressed = {e: False for e in ngraph.edges}
     processed = {v: ngraph.in_degree(v) != 1 for v in ngraph.nodes}
     for v in ngraph.nodes:
         if not processed[v]:
-            root, leaf_edges = get_out_tree(ngraph, v, processed)
-            out_trees[root] = leaf_edges
-    return out_trees
+            root, leaf_edges, processed, compressed = get_out_tree(ngraph, v, processed, compressed)
+            if leaf_edges:
+                out_trees[root] = leaf_edges
+    return out_trees, compressed
 
 
 def get_in_trees(ngraph):
 
     in_trees = dict()
+    compressed = {e: False for e in ngraph.edges(keys=True)}
     processed = {v: ngraph.out_degree(v) != 1 for v in ngraph.nodes}
     for v in ngraph.nodes:
         if not processed[v]:
-            root, leaf_edges = get_in_tree(ngraph, v, processed)
-            in_trees[root] = leaf_edges
-    return in_trees
+            root, leaf_edges, processed, compressed = get_in_tree(ngraph, v, processed, compressed)
+            if leaf_edges:
+                in_trees[root] = leaf_edges
+    return in_trees, compressed
 
 
 def get_y_to_v_contraction(ngraph):
 
-    out_trees = get_out_trees(ngraph)
+    out_trees, compressed = get_out_trees(ngraph)
 
     mngraph_out_contraction = nx.MultiDiGraph()
     for u, v in ngraph.edges():
-        if ngraph.in_degree(v) != 1 and ngraph.in_degree(u) != 1:
+        if not compressed[u, v]:
             mngraph_out_contraction.add_edge(u, v, flow=ngraph.edges[u, v]['flow'], pred=u)
 
     for root, leaf_edges in out_trees.items():
         for u, v in leaf_edges:
             mngraph_out_contraction.add_edge(root, v, flow=ngraph.edges[u, v]['flow'], pred=u)
 
-    in_trees = get_in_trees(mngraph_out_contraction)
+    in_trees, compressed = get_in_trees(mngraph_out_contraction)
 
     mngraph_in_contraction = nx.MultiDiGraph()
     for u, v, i in mngraph_out_contraction.edges(keys=True):
-        if mngraph_out_contraction.out_degree(u) != 1 and mngraph_out_contraction.out_degree(v) != 1:
+        if not compressed[u, v, i]:
             mngraph_in_contraction.add_edge(u, v, flow=mngraph_out_contraction.edges[u, v, i]['flow'], succ=(v, i))
 
     for root, leaf_edges in in_trees.items():
@@ -465,7 +479,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
         original = ngraph
         out_contraction, ngraph = get_y_to_v_contraction(ngraph)
         mapping = (original, out_contraction)
-        print(f'INFO: Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
+        print(f'Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
 
     # calculating source, sinks
     sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
@@ -497,6 +511,9 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
 
         output.write(f'# graph {g}\n')
         output_counters.write(f'# graph {g}\n')
+
+        if not graph['edges']:
+            continue
 
         graph = compute_graph_metadata(graph, use_excess_flow, use_y_to_v)
         mfd = mfd_algorithm(graph)
