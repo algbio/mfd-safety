@@ -55,11 +55,6 @@ def mfd_algorithm(data):
     return data
 
 
-def solve_instances(graphs_metadata):
-
-    return [mfd_algorithm(graph_metadata) for graph_metadata in graphs_metadata]
-
-
 def get_in_edges(graph, v):
     if type(graph) == nx.DiGraph:
         return [(u, v, 0) for u, _ in graph.in_edges(v)]
@@ -461,57 +456,50 @@ def get_expanded_path(path, mfd):
     return original_path
 
 
-def compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v):
+def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
 
-    output = list()
-    for graph in graphs:
+    # creation of NetworkX Graph
+    ngraph = nx.DiGraph()
+    ngraph.add_weighted_edges_from(graph['edges'], weight='flow')
+    if use_y_to_v:
+        original = ngraph
+        out_contraction, ngraph = get_y_to_v_contraction(ngraph)
+        mapping = (original, out_contraction)
+        print(f'INFO: Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
 
-        # creation of NetworkX Graph
-        ngraph = nx.DiGraph()
-        ngraph.add_weighted_edges_from(graph['edges'], weight='flow')
-        if use_y_to_v:
-            original = ngraph
-            out_contraction, ngraph = get_y_to_v_contraction(ngraph)
-            mapping = (original, out_contraction)
-            print(f'INFO: Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
+    # calculating source, sinks
+    sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
+    sinks = [x for x in ngraph.nodes if ngraph.out_degree(x) == 0]
 
-        # calculating source, sinks
-        sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
-        sinks = [x for x in ngraph.nodes if ngraph.out_degree(x) == 0]
+    if use_excess_flow:
+        in_flow = {v: sum([f for u, v, f in ngraph.in_edges(v, data='flow')]) for v in ngraph.nodes}
+        out_flow = {u: sum([f for u, v, f in ngraph.out_edges(u, data='flow')]) for u in ngraph.nodes}
 
-        if use_excess_flow:
-            in_flow = {v: sum([f for u, v, f in ngraph.in_edges(v, data='flow')]) for v in ngraph.nodes}
-            out_flow = {u: sum([f for u, v, f in ngraph.out_edges(u, data='flow')]) for u in ngraph.nodes}
-
-        # definition of data
-        data = {
-            'graph': ngraph,
-            'sources': sources,
-            'sinks': sinks,
-            'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1],
-            'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
-            'in_flow': in_flow if use_excess_flow else None,
-            'out_flow': out_flow if use_excess_flow else None,
-            'mapping': mapping if use_y_to_v else None
-        }
-
-        output.append(data)
-
-    return output
+    # definition of data
+    return {
+        'graph': ngraph,
+        'sources': sources,
+        'sinks': sinks,
+        'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1],
+        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'in_flow': in_flow if use_excess_flow else None,
+        'out_flow': out_flow if use_excess_flow else None,
+        'mapping': mapping if use_y_to_v else None
+    }
 
 
 def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
 
-    graphs = compute_graphs_metadata(graphs, use_excess_flow, use_y_to_v)
-    mfds = solve_instances(graphs)
-
     output = open(output_file, 'w+')
     output_counters = open(f'{output_file}.count', 'w+')
 
-    for g, mfd in enumerate(mfds):
+    for g, graph in enumerate(graphs):
 
         output.write(f'# graph {g}\n')
         output_counters.write(f'# graph {g}\n')
+
+        graph = compute_graph_metadata(graph, use_excess_flow, use_y_to_v)
+        mfd = mfd_algorithm(graph)
 
         paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
 
