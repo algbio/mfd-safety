@@ -8,7 +8,7 @@ import gurobipy as gp
 import time
 from gurobipy import GRB
 import pygraphviz as pgv
-from mfd_safety import read_input_graphs, solve_instances, build_base_ilp_model, compute_graphs_metadata
+from mfd_safety import read_input_graphs, mfd_algorithm, build_base_ilp_model, compute_graph_metadata
 
 
 # gloabl variable: number of ilp calls
@@ -77,15 +77,15 @@ def get_unsafe_paths(model, paths):
 # renamed this function
 def solve_group_testing_example(graphs, group_tests, output_file):
 
-    mfds = solve_instances(graphs)
-
     output = open(output_file, 'w+')
 
-    for g, (mfd, group_test) in enumerate(zip(mfds, group_tests)):
+    for g, (graph, group_test) in enumerate(zip(graphs, group_tests)):
 
         output.write(f"# graph {g}\n")
         print("Paths we are group testing:")
         print(group_test["paths"])
+
+        mfd = mfd_algorithm(graph)
 
         try:
             model = build_ilp_model_avoiding_multiple_paths(mfd, len(mfd['solution']), group_test['paths'])
@@ -263,14 +263,14 @@ def top_down(mfd, paths):
 
 def solve_group_testing(graphs, output_file, uef, use_y_to_v, alg):
 
-    graphs = compute_graphs_metadata(graphs, uef, use_y_to_v)
-    mfds = solve_instances(graphs)
     global group_test_ilp_calls
 
     output = open(output_file, 'w+')
     output_counters = open(f"{output_file}.count", 'w+')
 
-    for g, mfd in enumerate(mfds):
+    for g, graph in enumerate(graphs):
+        graph = compute_graph_metadata(graph, uef, use_y_to_v)
+        mfd = mfd_algorithm(graph)
         group_test_ilp_calls = 0
         output.write(f"# graph {g}\n")
         output_counters.write(f"# graph {g}\n")
