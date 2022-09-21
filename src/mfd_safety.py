@@ -408,13 +408,19 @@ def get_y_to_v_contraction(ngraph):
         for u, v, i in leaf_edges:
             mngraph_in_contraction.add_edge(u, root, flow=mngraph_out_contraction.edges[u, v, i]['flow'], succ=(v, i))
 
-    return mngraph_out_contraction, mngraph_in_contraction
+    # Remove trivial_paths found as edges from source to sink in the contraction
+    trivial_paths = list()
+    edges = list(mngraph_in_contraction.edges(keys=True))
+    for u, v, i in edges:
+        if mngraph_in_contraction.in_degree(u) == 0 and mngraph_in_contraction.out_degree(v) == 0:
+            trivial_paths.append(get_expanded_path([(u, v, i)], mngraph_in_contraction, ngraph, mngraph_out_contraction))
+            mngraph_in_contraction.remove_edge(u, v, i)
+
+    return mngraph_out_contraction, mngraph_in_contraction, trivial_paths
 
 
-def get_expanded_path(path, mfd):
+def get_expanded_path(path, graph, original_graph, out_contraction_graph):
 
-    graph = mfd['graph']
-    original_graph, out_contraction_graph = mfd['mapping']
     out_contraction_path = list()
 
     for u, v, i in path:
@@ -451,7 +457,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
     ngraph.add_weighted_edges_from(graph['edges'], weight='flow')
     if use_y_to_v:
         original = ngraph
-        out_contraction, ngraph = get_y_to_v_contraction(ngraph)
+        out_contraction, ngraph, trivial_paths = get_y_to_v_contraction(ngraph)
         mapping = (original, out_contraction)
         print(f'Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
 
@@ -468,11 +474,12 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
         'graph': ngraph,
         'sources': sources,
         'sinks': sinks,
-        'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1],
+        'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
         'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
-        'mapping': mapping if use_y_to_v else None
+        'mapping': mapping if use_y_to_v else None,
+        'trivial_paths': trivial_paths if use_y_to_v else None
     }
 
 
@@ -489,18 +496,25 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
         if not graph['edges']:
             continue
 
-        graph = compute_graph_metadata(graph, use_excess_flow, use_y_to_v)
-        mfd = mfd_algorithm(graph)
+        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v)
+        ilp_count = 0
 
-        paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
+        if len(mfd['graph'].edges) > 0:
 
-        for path, maximal_safe_paths in zip(paths, max_safe_paths):
-            # print path
-            for i, j in maximal_safe_paths:
-                max_path = path[i:j]
-                if use_y_to_v:
-                    max_path = get_expanded_path(max_path, mfd)
-                output_maximal_safe_path(output, max_path)
+            mfd = mfd_algorithm(mfd)
+            paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
+
+            for path, maximal_safe_paths in zip(paths, max_safe_paths):
+                # print path
+                for i, j in maximal_safe_paths:
+                    max_path = path[i:j]
+                    if use_y_to_v:
+                        max_path = get_expanded_path(max_path, mfd['graph'], mfd['mapping'][0], mfd['mapping'][1])
+                    output_maximal_safe_path(output, max_path)
+
+        if use_y_to_v:
+            for trivial_path in mfd['trivial_paths']:
+                output_maximal_safe_path(output, trivial_path)
 
         output_counters.write(f'{ilp_count}\n')
 
