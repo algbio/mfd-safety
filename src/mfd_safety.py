@@ -306,7 +306,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
 
 def find_right_maximal_extension_scan(mfd, paths, path, first, last):
 
-    while last + 1 < len(path) and is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
+    while last + 1 < len(path) and is_safe(mfd, len(paths), path[first:last + 2]):
         last += 1
 
     return last
@@ -320,7 +320,7 @@ def find_right_maximal_extension_bin_search(mfd, paths, path, first, last):
 def find_left_minimal_reduction_scan(mfd, paths, path, first, last):
 
     first += 1
-    while first <= last and not is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
+    while first <= last and not is_safe(mfd, len(paths), path[first:last + 2]):
         first += 1
 
     return first
