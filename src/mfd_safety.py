@@ -9,6 +9,8 @@ import gurobipy as gp
 from gurobipy import GRB
 from collections import deque
 
+ilp_counter = 0
+
 
 def get_edge(raw_edge):
 
@@ -153,6 +155,10 @@ def fd_fixed_size_forbidding_path(data, size, path):
         # Create a new model
         model = build_ilp_model_avoiding_path(data, size, path)
         model.optimize()
+
+        global ilp_counter
+        ilp_counter += 1
+
         data = update_status(data, model)
 
     except gp.GurobiError as e:
@@ -177,6 +183,10 @@ def fd_fixed_size(data, size):
 
         # objective function
         model.optimize()
+
+        global ilp_counter
+        ilp_counter += 1
+
         data = update_status(data, model)
         data = get_solution(model, data, size)
 
@@ -197,7 +207,6 @@ def output_maximal_safe_path(output, max_safe):
 
 def compute_maximal_safe_paths(mfd):
 
-    ilp_count = 0  # Number of ILP calls per graph
     paths = mfd['solution']
     max_safe_paths = list()
 
@@ -222,7 +231,6 @@ def compute_maximal_safe_paths(mfd):
                     maximal_safe_paths.append((first, len(path)))
                 break
 
-            ilp_count += 1
             if is_safe(mfd, len(paths), path[first:last + 2]):
                 last = last + 1
                 extending = True
@@ -234,7 +242,7 @@ def compute_maximal_safe_paths(mfd):
 
         max_safe_paths.append(maximal_safe_paths)
 
-    return paths, max_safe_paths, ilp_count
+    return paths, max_safe_paths
 
 
 def get_flow(e, mfd):
@@ -248,7 +256,6 @@ def get_flow(e, mfd):
 
 def compute_maximal_safe_paths_using_excess_flow(mfd):
 
-    ilp_count = 0  # Number of ILP calls per graph
     paths = mfd['solution']
     max_safe_paths = list()
 
@@ -280,12 +287,10 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
                 extending = True
                 excess_flow = extended_excess_flow
             elif is_safe(mfd, len(paths), path[first:last + 2]):
-                ilp_count += 1
                 last = last + 1
                 extending = True
                 excess_flow = extended_excess_flow
             else:
-                ilp_count += 1
                 if extending:
                     maximal_safe_paths.append((first, last + 1))
                     extending = False
@@ -295,7 +300,44 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
 
         max_safe_paths.append(maximal_safe_paths)
 
-    return paths, max_safe_paths, ilp_count
+    return paths, max_safe_paths
+
+
+def compute_maximal_safe_paths_using_exponential_search(mfd):
+
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    for path in paths:
+
+        maximal_safe_paths = list()
+
+        # two-finger algorithm
+        # Invariant: path[first:last+1] (python notation) is safe
+        first = 0
+        last = 0
+
+        while True:
+
+            # Extending
+            while last+1 < len(path) and is_safe(mfd, len(paths), path[first:last + 2]):
+                last += 1
+
+            maximal_safe_paths.append((first, last + 1))
+            if last == len(path) - 1:
+                break
+
+            # Reducing
+            first += 1
+
+            while first <= last and not is_safe(mfd, len(paths), path[first:last + 2]):
+                first += 1
+
+            last += 1
+
+        max_safe_paths.append(maximal_safe_paths)
+
+    return paths, max_safe_paths
 
 
 def get_out_tree(ngraph, v, processed, contracted):
@@ -450,7 +492,7 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
     return original_path
 
 
-def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
+def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_search):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -475,7 +517,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_exponential_search if use_exponential_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
@@ -483,7 +525,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v):
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
+def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use_exponential_search):
 
     output = open(output_file, 'w+')
     output_counters = open(f'{output_file}.count', 'w+')
@@ -496,13 +538,14 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
         if not graph['edges']:
             continue
 
-        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v)
-        ilp_count = 0
+        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_search)
+        global ilp_counter
+        ilp_counter = 0
 
         if len(mfd['graph'].edges) > 0:
 
             mfd = mfd_algorithm(mfd)
-            paths, max_safe_paths, ilp_count = mfd['compute'](mfd)
+            paths, max_safe_paths = mfd['compute'](mfd)
 
             for path, maximal_safe_paths in zip(paths, max_safe_paths):
                 # print path
@@ -516,7 +559,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v):
             for trivial_path in mfd['trivial_paths']:
                 output_maximal_safe_path(output, trivial_path)
 
-        output_counters.write(f'{ilp_count}\n')
+        output_counters.write(f'{ilp_counter}\n')
 
     output.close()
     output_counters.close()
@@ -537,6 +580,7 @@ if __name__ == '__main__':
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
+    parser.add_argument('-ues', '--use-exponential-search', action='store_true', help='Use exponential search in two-finger algorithm')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
@@ -549,4 +593,4 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f'INFO: Using {threads} threads for the Gurobi solver')
 
-    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v)
+    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, args.use_exponential_search)
