@@ -171,8 +171,24 @@ def fd_fixed_size_forbidding_path(data, size, path):
     return data
 
 
-def is_safe(mfd, k, path):
-    return fd_fixed_size_forbidding_path(mfd, k, path)['message'] != 'solved'
+def is_safe(mfd, k, path, i, j, safe_database=None, unsafe_database=None):
+    '''
+    --> safe_database[i] stores the safe_interval in path such that its left endpoint is the predecessor of i in the database.
+    We assume that safe_database contains a maximal set of intervals.
+    --> unsafe_database[j] stores the unsafe_interval in path such that its right endpoint is the predecesor of j in the database.
+    We assume that unsafe_database contains a minimal set of intervals.
+    '''
+
+    if safe_database:
+        si, sj = safe_database[i]
+        if si <= i and j <= sj:
+            return True
+    if unsafe_database:
+        ui, uj = unsafe_database[j]
+        if i <= ui and uj <= j:
+            return False
+
+    return fd_fixed_size_forbidding_path(mfd, k, path[i:j])['message'] != 'solved'
 
 
 def fd_fixed_size(data, size):
@@ -232,7 +248,7 @@ def compute_maximal_safe_paths(mfd):
                     maximal_safe_paths.append((first, len(path)))
                 break
 
-            if is_safe(mfd, len(paths), path[first:last + 2]):
+            if is_safe(mfd, len(paths), path, first, last + 2):
                 last = last + 1
                 extending = True
             else:
@@ -295,7 +311,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
                 last = last + 1
                 extending = True
                 excess_flow = extended_excess_flow
-            elif is_safe(mfd, len(paths), path[first:last + 2]):
+            elif is_safe(mfd, len(paths), path, first, last + 2):
                 last = last + 1
                 extending = True
                 excess_flow = extended_excess_flow
@@ -314,20 +330,20 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
 
 def find_right_maximal_extension_scan(mfd, paths, path, first, last):
 
-    while last + 1 < len(path) and is_safe(mfd, len(paths), path[first:last + 2]):
+    while last + 1 < len(path) and is_safe(mfd, len(paths), path, first, last + 2):
         last += 1
 
     return last
 
 
 def find_right_maximal_extension_bin_search(mfd, paths, path, first, last):
-    return bisect(range(last + 1, len(path)), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last
+    return bisect(range(last + 1, len(path)), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path, first, i + 1) else 1) + last
 
 
 def find_right_maximal_extension_exp_search(mfd, paths, path, first, last):
 
     exp = 0
-    while last + 1 + exp < len(path) and is_safe(mfd, len(paths), path[first:last + 2 + exp]):
+    while last + 1 + exp < len(path) and is_safe(mfd, len(paths), path, first, last + 2 + exp):
         exp = 2 * exp + 1
 
     if exp < 3:
@@ -335,7 +351,7 @@ def find_right_maximal_extension_exp_search(mfd, paths, path, first, last):
 
     exp = int((exp-1)/2)
 
-    return bisect(range(last + 2 + exp, min(last + 1 + 2*exp+1, len(path))), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last + 1 + exp
+    return bisect(range(last + 2 + exp, min(last + 1 + 2*exp+1, len(path))), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path, first, i + 1) else 1) + last + 1 + exp
 
 
 def find_right_maximal_extension_repeated_exp_search(mfd, paths, path, first, last):
@@ -345,7 +361,7 @@ def find_right_maximal_extension_repeated_exp_search(mfd, paths, path, first, la
 def find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
 
     exp = 0
-    while last + 1 + exp < limit and is_safe(mfd, len(paths), path[first:last + 2 + exp]):
+    while last + 1 + exp < limit and is_safe(mfd, len(paths), path, first, last + 2 + exp):
         exp = 2 * exp + 1
 
     if exp < 3:
@@ -359,7 +375,7 @@ def find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first
 def find_left_minimal_reduction_scan(mfd, paths, path, first, last, limit=None):
 
     first += 1
-    while first < limit if limit else last + 1 and not is_safe(mfd, len(paths), path[first:last + 2]):
+    while first < limit if limit else last + 1 and not is_safe(mfd, len(paths), path, first, last + 2):
         first += 1
 
     return first
@@ -367,13 +383,13 @@ def find_left_minimal_reduction_scan(mfd, paths, path, first, last, limit=None):
 
 def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit=None):
 
-    return bisect(range(first + 1, limit if limit else last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 1
+    return bisect(range(first + 1, limit if limit else last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path, i, last + 2) else 0) + first + 1
 
 
 def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit=None):
 
     exp = 0
-    while first + 1 + exp < limit if limit else last + 1 and not is_safe(mfd, len(paths), path[first+1+exp:last + 2]):
+    while first + 1 + exp < limit if limit else last + 1 and not is_safe(mfd, len(paths), path, first+1+exp, last + 2):
         exp = 2 * exp + 1
 
     if exp < 3:
@@ -381,7 +397,7 @@ def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit=
 
     exp = int((exp - 1) / 2)
 
-    return bisect(range(first + 2 + exp, first + 1 + 2*exp+1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 2 + exp
+    return bisect(range(first + 2 + exp, first + 1 + 2*exp+1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path, i, last + 2) else 0) + first + 2 + exp
 
 
 def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last, limit=None):
@@ -391,7 +407,7 @@ def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, las
 def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
 
     exp = 0
-    while first + 1 + exp < limit and not is_safe(mfd, len(paths), path[first + 1 + exp:last + 2]):
+    while first + 1 + exp < limit and not is_safe(mfd, len(paths), path, first + 1 + exp, last + 2):
         exp = 2 * exp + 1
 
     if exp < 3:
