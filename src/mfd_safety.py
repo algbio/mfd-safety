@@ -8,6 +8,7 @@ import networkx as nx
 import gurobipy as gp
 from gurobipy import GRB
 from collections import deque
+from bisect import bisect
 
 ilp_counter = 0
 
@@ -303,7 +304,7 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths
 
 
-def find_right_maximal_extension(mfd, path, first, last):
+def find_right_maximal_extension_scan(mfd, paths, path, first, last):
 
     while last + 1 < len(path) and is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
         last += 1
@@ -311,13 +312,23 @@ def find_right_maximal_extension(mfd, path, first, last):
     return last
 
 
-def find_left_minimal_reduction(mfd, path, first, last):
+def find_right_maximal_extension_bin_search(mfd, paths, path, first, last):
+
+    return bisect(range(last+1, len(path)), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last
+
+
+def find_left_minimal_reduction_scan(mfd, paths, path, first, last):
 
     first += 1
     while first <= last and not is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
         first += 1
 
     return first
+
+
+def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last):
+
+    return bisect(range(first + 1, last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 1
 
 
 def compute_maximal_safe_paths_using_exponential_search(mfd):
@@ -337,14 +348,14 @@ def compute_maximal_safe_paths_using_exponential_search(mfd):
         while True:
 
             # Extending
-            last = find_right_maximal_extension(mfd, path, first, last)
+            last = find_right_maximal_extension_bin_search(mfd, paths, path, first, last)
 
             maximal_safe_paths.append((first, last + 1))
             if last == len(path) - 1:
                 break
 
             # Reducing
-            first = find_left_minimal_reduction(mfd, path, first, last)
+            first = find_left_minimal_reduction_bin_search(mfd, paths, path, first, last)
 
             last += 1
 
