@@ -248,11 +248,19 @@ def compute_maximal_safe_paths(mfd):
 
 def get_flow(e, mfd):
 
-    graph = mfd['graph']
-    if type(graph) == nx.DiGraph:
-        return graph.edges[e[0], e[1]]['flow']
-    else:
-        return graph.edges[e]['flow']
+    return mfd['graph'].edges[e]['flow']
+
+
+def get_excess_flow(path, mfd):
+
+    if not path:
+        return 0
+
+    excess_flow = get_flow(path[0], mfd)
+    for e in path[1:]:
+        excess_flow = excess_flow + get_flow(e, mfd) - mfd['out_flow'][e[0]]
+
+    return excess_flow
 
 
 def compute_maximal_safe_paths_using_excess_flow(mfd):
@@ -348,24 +356,24 @@ def find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first
     return find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last + 1 + exp, min(last + 1 + 2 * exp + 1, len(path)))
 
 
-def find_left_minimal_reduction_scan(mfd, paths, path, first, last):
+def find_left_minimal_reduction_scan(mfd, paths, path, first, last, limit=None):
 
     first += 1
-    while first <= last and not is_safe(mfd, len(paths), path[first:last + 2]):
+    while first < limit if limit else last + 1 and not is_safe(mfd, len(paths), path[first:last + 2]):
         first += 1
 
     return first
 
 
-def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last):
+def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit=None):
 
-    return bisect(range(first + 1, last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 1
+    return bisect(range(first + 1, limit if limit else last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 1
 
 
-def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last):
+def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit=None):
 
     exp = 0
-    while first + 1 + exp < last + 1 and not is_safe(mfd, len(paths), path[first+1+exp:last + 2]):
+    while first + 1 + exp < limit if limit else last + 1 and not is_safe(mfd, len(paths), path[first+1+exp:last + 2]):
         exp = 2 * exp + 1
 
     if exp < 3:
@@ -376,8 +384,8 @@ def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last):
     return bisect(range(first + 2 + exp, first + 1 + 2*exp+1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 2 + exp
 
 
-def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last):
-    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, last+1)
+def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last, limit=None):
+    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit if limit else last + 1)
 
 
 def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
@@ -419,6 +427,51 @@ def compute_maximal_safe_paths_using_faster_search(mfd):
 
             # Reducing
             first = find_left_minimal_reduction_bin_search(mfd, paths, path, first, last)
+
+            last += 1
+
+        max_safe_paths.append(maximal_safe_paths)
+
+    return paths, max_safe_paths
+
+
+def compute_maximal_safe_paths_using_faster_search_and_excess_flow(mfd):
+
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    for path in paths:
+
+        maximal_safe_paths = list()
+
+        # two-finger algorithm
+        # Invariant: path[first:last+1] (python notation) is safe
+        first = 0
+        last = 0
+
+        while True:
+
+            excess_flow = get_excess_flow(path[first:last+1], mfd)
+            # Extending
+            while last+1 < len(path) and excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd) > 0:
+                excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
+                last += 1
+
+            last = find_right_maximal_extension_bin_search(mfd, paths, path, first, last)
+            maximal_safe_paths.append((first, last + 1))
+
+            if last == len(path) - 1:
+                break
+
+            # Reducing
+            ef = get_flow(path[last+1], mfd)
+            limit = last+1
+
+            while limit > 0 and ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd) > 0:
+                ef = ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd)
+                limit -= 1
+
+            first = find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit)
 
             last += 1
 
@@ -604,7 +657,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_faster_search if use_faster_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_faster_search_and_excess_flow if use_faster_search and use_excess_flow else compute_maximal_safe_paths_using_faster_search if use_faster_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
