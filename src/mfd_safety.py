@@ -313,8 +313,39 @@ def find_right_maximal_extension_scan(mfd, paths, path, first, last):
 
 
 def find_right_maximal_extension_bin_search(mfd, paths, path, first, last):
+    return bisect(range(last + 1, len(path)), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last
 
-    return bisect(range(last+1, len(path)), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last
+
+def find_right_maximal_extension_exp_search(mfd, paths, path, first, last):
+
+    exp = 0
+    while last + 1 + exp < len(path) and is_safe(mfd, len(paths), path[first:last + 2 + exp]):
+        exp = 2 * exp + 1
+
+    if exp < 3:
+        return last + exp
+
+    exp = int((exp-1)/2)
+
+    return bisect(range(last + 2 + exp, min(last + 1 + 2*exp+1, len(path))), 0, key=lambda i: 0 if is_safe(mfd, len(paths), path[first:i + 1]) else 1) + last + 1 + exp
+
+
+def find_right_maximal_extension_repeated_exp_search(mfd, paths, path, first, last):
+    return find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last, len(path))
+
+
+def find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
+
+    exp = 0
+    while last + 1 + exp < limit and is_safe(mfd, len(paths), path[first:last + 2 + exp]):
+        exp = 2 * exp + 1
+
+    if exp < 3:
+        return last + exp
+
+    exp = int((exp - 1) / 2)
+
+    return find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last + 1 + exp, min(last + 1 + 2 * exp + 1, len(path)))
 
 
 def find_left_minimal_reduction_scan(mfd, paths, path, first, last):
@@ -331,7 +362,39 @@ def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last):
     return bisect(range(first + 1, last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 1
 
 
-def compute_maximal_safe_paths_using_exponential_search(mfd):
+def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last):
+
+    exp = 0
+    while first + 1 + exp < last + 1 and not is_safe(mfd, len(paths), path[first+1+exp:last + 2]):
+        exp = 2 * exp + 1
+
+    if exp < 3:
+        return first + 1 + exp
+
+    exp = int((exp - 1) / 2)
+
+    return bisect(range(first + 2 + exp, first + 1 + 2*exp+1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path[i:last + 2]) else 0) + first + 2 + exp
+
+
+def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last):
+    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, last+1)
+
+
+def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
+
+    exp = 0
+    while first + 1 + exp < limit and not is_safe(mfd, len(paths), path[first + 1 + exp:last + 2]):
+        exp = 2 * exp + 1
+
+    if exp < 3:
+        return first + 1 + exp
+
+    exp = int((exp - 1) / 2)
+
+    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first + 1 + exp, last, first + 1 + 2 * exp + 1)
+
+
+def compute_maximal_safe_paths_using_faster_search(mfd):
 
     paths = mfd['solution']
     max_safe_paths = list()
@@ -516,7 +579,7 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
     return original_path
 
 
-def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_search):
+def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -541,7 +604,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_s
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_exponential_search if use_exponential_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_faster_search if use_faster_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
@@ -549,7 +612,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_s
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use_exponential_search):
+def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use_faster_search):
 
     output = open(output_file, 'w+')
     output_counters = open(f'{output_file}.count', 'w+')
@@ -562,7 +625,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use
         if not graph['edges']:
             continue
 
-        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_exponential_search)
+        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search)
         global ilp_counter
         ilp_counter = 0
 
@@ -604,7 +667,7 @@ if __name__ == '__main__':
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
-    parser.add_argument('-ues', '--use-exponential-search', action='store_true', help='Use exponential search in two-finger algorithm')
+    parser.add_argument('-ufs', '--use-faster-search', action='store_true', help='Use faster search in two-finger algorithm')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
@@ -617,4 +680,4 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f'INFO: Using {threads} threads for the Gurobi solver')
 
-    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, args.use_exponential_search)
+    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, args.use_faster_search)
