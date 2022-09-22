@@ -303,6 +303,23 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths
 
 
+def find_right_maximal_extension(mfd, path, first, last):
+
+    while last + 1 < len(path) and is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
+        last += 1
+
+    return last
+
+
+def find_left_minimal_reduction(mfd, path, first, last):
+
+    first += 1
+    while first <= last and not is_safe(mfd, len(mfd['solution']), path[first:last + 2]):
+        first += 1
+
+    return first
+
+
 def compute_maximal_safe_paths_using_exponential_search(mfd):
 
     paths = mfd['solution']
@@ -320,18 +337,14 @@ def compute_maximal_safe_paths_using_exponential_search(mfd):
         while True:
 
             # Extending
-            while last+1 < len(path) and is_safe(mfd, len(paths), path[first:last + 2]):
-                last += 1
+            last = find_right_maximal_extension(mfd, path, first, last)
 
             maximal_safe_paths.append((first, last + 1))
             if last == len(path) - 1:
                 break
 
             # Reducing
-            first += 1
-
-            while first <= last and not is_safe(mfd, len(paths), path[first:last + 2]):
-                first += 1
+            first = find_left_minimal_reduction(mfd, path, first, last)
 
             last += 1
 
