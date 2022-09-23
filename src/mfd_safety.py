@@ -222,46 +222,6 @@ def output_maximal_safe_path(output, max_safe):
     output.write('\n')
 
 
-def compute_maximal_safe_paths(mfd):
-
-    paths = mfd['solution']
-    max_safe_paths = list()
-
-    for path in paths:
-
-        maximal_safe_paths = list()
-
-        # two-finger algorithm
-        # Invariant: path[first:last+1] (python notation) is safe
-        first = 0
-        last = 0
-        extending = True
-
-        while True:
-
-            if first > last:
-                last = first
-                extending = True
-
-            if last >= len(path) - 1:
-                if extending:
-                    maximal_safe_paths.append((first, len(path)))
-                break
-
-            if is_safe(mfd, len(paths), path, first, last + 2):
-                last = last + 1
-                extending = True
-            else:
-                if extending:
-                    maximal_safe_paths.append((first, last + 1))
-                    extending = False
-                first = first + 1
-
-        max_safe_paths.append(maximal_safe_paths)
-
-    return paths, max_safe_paths
-
-
 def get_flow(e, mfd):
 
     return mfd['graph'].edges[e]['flow']
@@ -277,55 +237,6 @@ def get_excess_flow(path, mfd):
         excess_flow = excess_flow + get_flow(e, mfd) - mfd['out_flow'][e[0]]
 
     return excess_flow
-
-
-def compute_maximal_safe_paths_using_excess_flow(mfd):
-
-    paths = mfd['solution']
-    max_safe_paths = list()
-
-    for path in paths:
-
-        maximal_safe_paths = list()
-        excess_flow = get_flow(path[0], mfd)
-
-        # two-finger algorithm
-        # Invariant: path[first:last+1] (python notation) is safe
-        first = 0
-        last = 0
-        extending = True
-
-        while True:
-
-            if first > last:
-                last = first
-                extending = True
-
-            if last >= len(path) - 1:
-                if extending:
-                    maximal_safe_paths.append((first, len(path)))
-                break
-
-            extended_excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
-            if extended_excess_flow > 0:
-                last = last + 1
-                extending = True
-                excess_flow = extended_excess_flow
-            elif is_safe(mfd, len(paths), path, first, last + 2):
-                last = last + 1
-                extending = True
-                excess_flow = extended_excess_flow
-            else:
-                if extending:
-                    maximal_safe_paths.append((first, last + 1))
-                    extending = False
-
-                excess_flow += mfd['in_flow'][path[first][1]] - get_flow(path[first], mfd)
-                first = first + 1
-
-        max_safe_paths.append(maximal_safe_paths)
-
-    return paths, max_safe_paths
 
 
 def find_right_maximal_extension_scan(mfd, paths, path, first, last):
@@ -418,7 +329,7 @@ def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first,
     return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first + 1 + exp, last, first + 1 + 2 * exp + 1)
 
 
-def compute_maximal_safe_paths_using_faster_search(mfd):
+def compute_maximal_safe_paths(mfd):
 
     paths = mfd['solution']
     max_safe_paths = list()
@@ -435,14 +346,20 @@ def compute_maximal_safe_paths_using_faster_search(mfd):
         while True:
 
             # Extending
-            last = find_right_maximal_extension_bin_search(mfd, paths, path, first, last)
+            if len(path) - last > mfd['extension_strategy_threshold']:
+                last = mfd['extension_strategy_large'](mfd, paths, path, first, last)
+            else:
+                last = mfd['extension_strategy_small'](mfd, paths, path, first, last)
 
             maximal_safe_paths.append((first, last + 1))
             if last == len(path) - 1:
                 break
 
             # Reducing
-            first = find_left_minimal_reduction_bin_search(mfd, paths, path, first, last)
+            if last+1 - first > mfd['reduction_strategy_threshold']:
+                first = mfd['reduction_strategy_large'](mfd, paths, path, first, last)
+            else:
+                first = mfd['reduction_strategy_small'](mfd, paths, path, first, last)
 
             last += 1
 
@@ -451,7 +368,7 @@ def compute_maximal_safe_paths_using_faster_search(mfd):
     return paths, max_safe_paths
 
 
-def compute_maximal_safe_paths_using_faster_search_and_excess_flow(mfd):
+def compute_maximal_safe_paths_using_excess_flow(mfd):
 
     paths = mfd['solution']
     max_safe_paths = list()
@@ -473,7 +390,11 @@ def compute_maximal_safe_paths_using_faster_search_and_excess_flow(mfd):
                 excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
                 last += 1
 
-            last = find_right_maximal_extension_bin_search(mfd, paths, path, first, last)
+            if len(path) - last > mfd['extension_strategy_threshold']:
+                last = mfd['extension_strategy_large'](mfd, paths, path, first, last)
+            else:
+                last = mfd['extension_strategy_small'](mfd, paths, path, first, last)
+
             maximal_safe_paths.append((first, last + 1))
 
             if last == len(path) - 1:
@@ -487,7 +408,10 @@ def compute_maximal_safe_paths_using_faster_search_and_excess_flow(mfd):
                 ef = ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd)
                 limit -= 1
 
-            first = find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit)
+            if limit - first > mfd['reduction_strategy_threshold']:
+                first = mfd['reduction_strategy_large'](mfd, paths, path, first, last, limit)
+            else:
+                first = mfd['reduction_strategy_small'](mfd, paths, path, first, last, limit)
 
             last += 1
 
@@ -648,7 +572,7 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
     return original_path
 
 
-def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search):
+def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -673,15 +597,21 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_faster_search_and_excess_flow if use_faster_search and use_excess_flow else compute_maximal_safe_paths_using_faster_search if use_faster_search else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
-        'trivial_paths': trivial_paths if use_y_to_v else None
+        'trivial_paths': trivial_paths if use_y_to_v else None,
+        'extension_strategy_small': find_right_maximal_extension_scan if 'extension_strategy_small' not in strategy else strategy['extension_strategy_small'],
+        'extension_strategy_large': find_right_maximal_extension_scan if 'extension_strategy_large' not in strategy else strategy['extension_strategy_large'],
+        'reduction_strategy_small': find_left_minimal_reduction_scan if 'reduction_strategy_small' not in strategy else strategy['reduction_strategy_small'],
+        'reduction_strategy_large': find_left_minimal_reduction_scan if 'reduction_strategy_large' not in strategy else strategy['reduction_strategy_large'],
+        'reduction_strategy_threshold': float('-inf') if 'reduction_strategy_threshold' not in strategy else strategy['reduction_strategy_threshold'],
+        'extension_strategy_threshold': float('-inf') if 'extension_strategy_threshold' not in strategy else strategy['extension_strategy_threshold'],
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use_faster_search):
+def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, strategy):
 
     output = open(output_file, 'w+')
     output_counters = open(f'{output_file}.count', 'w+')
@@ -694,7 +624,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use
         if not graph['edges']:
             continue
 
-        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, use_faster_search)
+        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy)
         global ilp_counter
         ilp_counter = 0
 
@@ -721,6 +651,66 @@ def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, use
     output_counters.close()
 
 
+def parse_strategy(strategy_str):
+
+    if strategy_str == 'scan':
+        return find_right_maximal_extension_scan, find_left_minimal_reduction_scan
+
+    if strategy_str == 'bin_search':
+        return find_right_maximal_extension_bin_search, find_left_minimal_reduction_bin_search
+
+    if strategy_str == 'exp_search':
+        return find_right_maximal_extension_exp_search, find_left_minimal_reduction_exp_search
+
+    if strategy_str == 'rep_exp_search':
+        return find_right_maximal_extension_repeated_exp_search, find_left_minimal_reduction_repeated_exp_search
+
+    return None
+
+
+def get_strategy(args):
+
+    strategy = dict()
+
+    if args.strategy_threshold:
+        strategy['extension_strategy_threshold'] = args.strategy_threshold
+        strategy['reduction_strategy_threshold'] = args.strategy_threshold
+
+    if args.extension_strategy_threshold:
+        strategy['extension_strategy_threshold'] = args.extension_strategy_threshold
+
+    if args.reduction_strategy_threshold:
+        strategy['reduction_strategy_threshold'] = args.reduction_strategy_threshold
+
+    if parse_strategy(args.strategy):
+        strategy['extension_strategy_small'] = parse_strategy(args.strategy)[0]
+        strategy['extension_strategy_large'] = parse_strategy(args.strategy)[0]
+        strategy['reduction_strategy_small'] = parse_strategy(args.strategy)[1]
+        strategy['reduction_strategy_large'] = parse_strategy(args.strategy)[1]
+
+    if parse_strategy(args.extension_strategy):
+        strategy['extension_strategy_small'] = parse_strategy(args.extension_strategy)[0]
+        strategy['extension_strategy_large'] = parse_strategy(args.extension_strategy)[0]
+
+    if parse_strategy(args.reduction_strategy):
+        strategy['reduction_strategy_small'] = parse_strategy(args.reduction_strategy)[1]
+        strategy['reduction_strategy_large'] = parse_strategy(args.reduction_strategy)[1]
+
+    if parse_strategy(args.extension_strategy_small):
+        strategy['extension_strategy_small'] = parse_strategy(args.extension_strategy_small)[0]
+
+    if parse_strategy(args.extension_strategy_large):
+        strategy['extension_strategy_large'] = parse_strategy(args.extension_strategy_large)[0]
+
+    if parse_strategy(args.reduction_strategy_small):
+        strategy['reduction_strategy_small'] = parse_strategy(args.reduction_strategy_small)[1]
+
+    if parse_strategy(args.reduction_strategy_large):
+        strategy['reduction_strategy_large'] = parse_strategy(args.reduction_strategy_large)[1]
+
+    return strategy
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
@@ -736,7 +726,17 @@ if __name__ == '__main__':
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
-    parser.add_argument('-ufs', '--use-faster-search', action='store_true', help='Use faster search in two-finger algorithm')
+
+    parser.add_argument('-s', '--strategy', type=str, help='Strategy for extension and reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search}')
+    parser.add_argument('-es', '--extension-strategy', type=str, help='Strategy for extension of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search}')
+    parser.add_argument('-rs', '--reduction-strategy', type=str, help='Strategy for reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search}')
+    parser.add_argument('-ess', '--extension-strategy-small', type=str, help='Strategy for extension of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search} when the search space is small (specified by threshold)')
+    parser.add_argument('-esl', '--extension-strategy-large', type=str, help='Strategy for extension of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search} when the search space is large (specified by threshold)')
+    parser.add_argument('-rss', '--reduction-strategy-small', type=str, help='Strategy for reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search} when the search space is small (specified by threshold)')
+    parser.add_argument('-rsl', '--reduction-strategy-large', type=str, help='Strategy for reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search} when the search space is large (specified by threshold)')
+    parser.add_argument('-st', '--strategy-threshold', type=int, help='Search space threshold to switch from --<>-strategy-small to --<>-strategy-large')
+    parser.add_argument('-est', '--extension-strategy-threshold', type=int, help='Search space threshold to switch from --extension-strategy-small to --extension-strategy-large')
+    parser.add_argument('-rst', '--reduction-strategy-threshold', type=int, help='Search space threshold to switch from --reduction-strategy-small to --reduction-strategy-large')
 
     requiredNamed = parser.add_argument_group('required arguments')
     requiredNamed.add_argument('-i', '--input', type=str, help='Input filename', required=True)
@@ -749,4 +749,4 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f'INFO: Using {threads} threads for the Gurobi solver')
 
-    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, args.use_faster_search)
+    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, get_strategy(args))
