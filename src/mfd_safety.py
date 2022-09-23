@@ -572,7 +572,7 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
     return original_path
 
 
-def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy):
+def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strategy=dict()):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -611,7 +611,7 @@ def compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy):
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow, use_y_to_v, strategy):
+def solve_instances_safety(graphs, output_file, use_excess_flow=False, use_y_to_v=False, strategy=dict()):
 
     output = open(output_file, 'w+')
     output_counters = open(f'{output_file}.count', 'w+')
