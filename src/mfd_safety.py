@@ -10,7 +10,9 @@ from gurobipy import GRB
 from collections import deque
 from bisect import bisect
 
-ilp_counter = 0
+
+class TimeoutILP(Exception):
+    pass
 
 
 def get_edge(raw_edge):
@@ -138,6 +140,9 @@ def get_solution(model, data, size):
 
 def update_status(data, model):
 
+    global ilp_counter
+    ilp_counter += 1
+
     if model.status == GRB.OPTIMAL:
         data['message'] = 'solved'
         data['runtime'] = model.Runtime
@@ -146,10 +151,20 @@ def update_status(data, model):
         data['message'] = 'unsolved'
         data['runtime'] = 0
 
+    if ilp_time_budget:
+        global time_budget
+        time_budget -= model.Runtime
+
+        if model.status == GRB.TIME_LIMIT:
+            raise TimeoutILP()
+
     return data
 
 
 def fd_fixed_size_forbidding_path(data, size, path):
+
+    if ilp_time_budget and time_budget < 0:
+        raise TimeoutILP()
 
     # calculate a flow decomposition into size paths avoiding path
     try:
@@ -157,8 +172,8 @@ def fd_fixed_size_forbidding_path(data, size, path):
         model = build_ilp_model_avoiding_path(data, size, path)
         model.optimize()
 
-        global ilp_counter
-        ilp_counter += 1
+        if ilp_time_budget:
+            model.setParam('TimeLimit', time_budget)
 
         data = update_status(data, model)
 
@@ -193,16 +208,20 @@ def is_safe(mfd, k, path, i, j, safe_database=None, unsafe_database=None):
 
 def fd_fixed_size(data, size):
 
+    if ilp_time_budget and time_budget < 0:
+        raise TimeoutILP()
+
     # calculate a flow decomposition into size paths
     try:
         # Create a new model
         model, _, _, _ = build_base_ilp_model(data, size)
 
+
+        if ilp_time_budget:
+            model.setParam('TimeLimit', time_budget)
+
         # objective function
         model.optimize()
-
-        global ilp_counter
-        ilp_counter += 1
 
         data = update_status(data, model)
         data = get_solution(model, data, size)
@@ -420,6 +439,96 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
     return paths, max_safe_paths
 
 
+def extract_weighted_path(sources, graph):
+
+    path = list()
+    for s in sources:
+        first_edges = [e for e in graph.out_edges(s, keys=True) if graph.edges[e]['remaining_flow'] > 0]
+        if first_edges:
+            path.append(first_edges[0])
+            while [e for e in graph.out_edges(path[-1][1], keys=True) if graph.edges[e]['remaining_flow'] > 0]:
+                path.append([e for e in graph.out_edges(path[-1][1], keys=True) if graph.edges[e]['remaining_flow'] > 0][0])
+            break
+
+    return path, min([graph.edges[e]['remaining_flow'] for e in path])
+
+
+def decompose_flow(mfd):
+
+    weights, paths = list(), list()
+
+    sources, sinks = mfd['sources'], mfd['sinks']
+    graph = mfd['graph']
+
+    remaining_flow = sum([mfd['out_flow'][s] for s in sources])
+
+    edges = list(graph.edges(keys=True))
+    for e in edges:
+        graph.edges[e]['remaining_flow'] = graph.edges[e]['flow']
+
+    while remaining_flow > 0:
+
+        path, weight = extract_weighted_path(sources, graph)
+        weights.append(weight)
+        paths.append(path)
+
+        for e in path:
+            graph.edges[e]['remaining_flow'] -= weight
+        remaining_flow -= weight
+
+    mfd['solution'], mfd['weights'] = paths, weights
+
+    return mfd
+
+
+def compute_maximal_safe_paths_for_flow_decompositions(mfd):
+
+    if 'in_flow' not in mfd:
+        mfd['in_flow'] = {v: sum([f for u, v, f in mfd['graph'].in_edges(v, data='flow')]) for v in mfd['graph'].nodes}
+        mfd['out_flow'] = {u: sum([f for u, v, f in mfd['graph'].out_edges(u, data='flow')]) for u in mfd['graph'].nodes}
+
+    if not mfd['solution']:
+        mfd = decompose_flow(mfd)
+
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    for path in paths:
+
+        maximal_safe_paths = list()
+
+        # two-finger algorithm
+        # Invariant: path[first:last+1] (python notation) is safe
+        first = 0
+        last = 0
+        excess_flow = get_excess_flow(path[first:last + 1], mfd)
+
+        while True:
+
+            # Extending
+            while last + 1 < len(path) and excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1],
+                                                                                                   mfd) > 0:
+                excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
+                last += 1
+
+            maximal_safe_paths.append((first, last + 1))
+
+            if last == len(path) - 1:
+                break
+
+            excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
+            last += 1
+
+            # Reducing
+            while first < last and excess_flow < 0:
+                excess_flow = excess_flow + mfd['in_flow'][path[first][1]] + get_flow(path[first], mfd)
+                first += 1
+
+        max_safe_paths.append(maximal_safe_paths)
+
+    return paths, max_safe_paths
+
+
 def get_out_tree(ngraph, v, processed, contracted):
 
     cont = {e: contracted[e] for e in contracted}
@@ -581,7 +690,6 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strat
         original = ngraph
         out_contraction, ngraph, trivial_paths = get_y_to_v_contraction(ngraph)
         mapping = (original, out_contraction)
-        print(f'Y2V contraction reduced the number of edges from {len(original.edges)} to {len(ngraph.edges)}')
 
     # calculating source, sinks
     sources = [x for x in ngraph.nodes if ngraph.in_degree(x) == 0]
@@ -614,24 +722,37 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strat
 def solve_instances_safety(graphs, output_file, use_excess_flow=False, use_y_to_v=False, strategy=dict()):
 
     output = open(output_file, 'w+')
-    output_counters = open(f'{output_file}.count', 'w+')
+    output_stats = open(f'{output_file}.stats', 'w+')
 
     for g, graph in enumerate(graphs):
 
         output.write(f'# graph {g}\n')
-        output_counters.write(f'# graph {g}\n')
+        output_stats.write(f'# graph {g}\n')
 
         if not graph['edges']:
             continue
 
         mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy)
+
+        if use_y_to_v:
+            output_stats.write(f'Y2V: {len(mfd["graph"].edges)}/{len(mfd["mapping"][0].edges)}\n')
+
         global ilp_counter
         ilp_counter = 0
+        global time_budget
+        time_budget = ilp_time_budget
 
         if len(mfd['graph'].edges) > 0:
 
-            mfd = mfd_algorithm(mfd)
-            paths, max_safe_paths = mfd['compute'](mfd)
+            try:
+                mfd = mfd_algorithm(mfd)
+                paths, max_safe_paths = mfd['compute'](mfd)
+                output_stats.write('timeout: 0\n')
+
+            except TimeoutILP:
+
+                paths, max_safe_paths = compute_maximal_safe_paths_for_flow_decompositions(mfd)
+                output_stats.write('timeout: 1\n')
 
             for path, maximal_safe_paths in zip(paths, max_safe_paths):
                 # print path
@@ -645,10 +766,12 @@ def solve_instances_safety(graphs, output_file, use_excess_flow=False, use_y_to_
             for trivial_path in mfd['trivial_paths']:
                 output_maximal_safe_path(output, trivial_path)
 
-        output_counters.write(f'{ilp_counter}\n')
+        output_stats.write(f'ILP count: {ilp_counter}\n')
+        if ilp_time_budget:
+            output_stats.write(f'ILP time used: {ilp_time_budget-time_budget}/{ilp_time_budget}\n')
 
     output.close()
-    output_counters.close()
+    output_stats.close()
 
 
 def parse_strategy(strategy_str):
@@ -724,6 +847,8 @@ if __name__ == '__main__':
                         help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
     parser.add_argument('-t', '--threads', type=int, default=0,
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
+    parser.add_argument('-ilptb', '--ilp-time-budget', type=float, help='Maximum time (in seconds) that the ilp solver is allowed to take when computing safe paths')
+
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
 
@@ -749,4 +874,7 @@ if __name__ == '__main__':
         threads = os.cpu_count()
     print(f'INFO: Using {threads} threads for the Gurobi solver')
 
+    ilp_counter = 0
+    ilp_time_budget = args.ilp_time_budget
+    time_budget = args.ilp_time_budget
     solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, get_strategy(args))
