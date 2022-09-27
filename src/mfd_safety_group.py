@@ -69,7 +69,7 @@ def build_ilp_model_avoiding_multiple_paths(data, size, paths):
 def get_unsafe_paths(model, paths):
 
     if model.status == GRB.OPTIMAL:
-        return [path for p, path in enumerate(paths) if model.getVarByName(f'r[{p}]').x == 1]
+        return [path for p, path in enumerate(paths) if round(model.getVarByName(f'r[{p}]').x) == 1]
 
     return list()
 

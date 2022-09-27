@@ -126,9 +126,9 @@ def get_solution(model, data, size):
         w_sol = [0] * len(range(size))
         paths = [list() for _ in range(size)]
         for k in range(size):
-            w_sol[k] = model.getVarByName(f'w[{k}]').x
+            w_sol[k] = round(model.getVarByName(f'w[{k}]').x)
         for (u, v, i, k) in T:
-            if model.getVarByName(f'x[{u},{v},{i},{k}]').x == 1:
+            if round(model.getVarByName(f'x[{u},{v},{i},{k}]').x) == 1:
                 paths[k].append((u, v, i))
         for k in range(len(paths)):
             paths[k] = sorted(paths[k])
