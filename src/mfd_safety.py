@@ -170,10 +170,9 @@ def fd_fixed_size_forbidding_path(data, size, path):
     try:
         # Create a new model
         model = build_ilp_model_avoiding_path(data, size, path)
-        model.optimize()
-
         if ilp_time_budget:
             model.setParam('TimeLimit', time_budget)
+        model.optimize()
 
         data = update_status(data, model)
 
@@ -838,7 +837,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
         description='''
-        Computes maximal safe paths for Minimum Flow Decomposition. 
+        Computes maximal safe paths for Minimum Flow Decomposition.
         This script uses the Gurobi ILP solver.
         ''',
         formatter_class=argparse.RawTextHelpFormatter
