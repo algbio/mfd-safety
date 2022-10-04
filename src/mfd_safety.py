@@ -363,18 +363,81 @@ def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first,
     return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first + 1 + exp, last, first + 1 + 2 * exp + 1)
 
 
-def get_safe(paths, mfd):
-    """Takes in a set of paths and returns those paths that are safe."""
-    # should paths be indices?
+def get_unsafe_paths(model, paths):
+
+    if model.status == GRB.OPTIMAL:
+        return [path for p, path in enumerate(paths) if round(model.getVarByName(f'r[{p}]').x) == 1]
+
+    return list()
+
+
+def get_safe(mfd, k, paths, path_indices):
+    """Takes in a set of paths and returns those paths that are safe.
+    paths is a list of paths of an mfd.
+    path_indices is a list of lists of indices (lists of size 2) into those paths.
+    Implements Algorithm 3 in the paper."""
+
+    if ilp_time_budget and time_budget < 0:
+        raise TimeoutILP()
+
+    # change from indices to actual paths
+    paths_to_test = []
+    for (path, indices) in zip(paths, path_indices):
+        for index_pair in indices:
+            left = index_pair[0]
+            right = index_pair[1]
+            paths_to_test.append(path[left:right])
+
+    model = build_ilp_model_avoiding_multiple_paths(mfd, k, paths_to_test)
+
+    if ilp_time_budget:
+        model.setParam('TimeLimit', time_budget)
+    model.optimize()
+
+    # update status updates the global ilp counter and the global time budget
+    # it raises a time out exception if we went over the time limit
+    # it takes a first argument, data. I am assuming that the content of this variable doesn't matter at the start.
+    # I'm also not using what it returns
+    update_status(dict(), model)
+
+    unsafe_paths = get_unsafe_paths(model, paths_to_test)
+    # get the P\N (maybe sfe) indices from the unsafe paths
+    # for every index...was it in N? if not, keep it
+    unknown_indices = [[] for path in paths]
+    for i, (path, indices) in enumerate(zip(paths, path_indices)):
+        for index_pair in indices:
+            left = index_pair[0]
+            right = index_pair[1]
+            if not path[left:right] in unsafe_paths:
+                unknown_indices[i].append([left, right])
+
+    if not unsafe_paths:
+        return path_indices
+    else:
+        # call on the maybe safe paths
+        return get_safe(mfd, k, paths, unknown_indices)
+
+
+# TODO: update inputs to use indices
+def all_maximal_safe_paths_top_down(mfd, paths, max_safe_paths):
+    """
+    Use group testing in a top down fashion.
+    Implements algorithm 6 from paper.
+    """
+    pass
 
 
 def compute_maximal_safe_paths_using_group(mfd):
-    """Use group testing in a top down fashion."""
 
     paths = mfd['solution']
     max_safe_paths = list()
+    indices = [[[0, len(path)]] for path in paths]
 
-    # run AllMaximalSafePathsTopDown(mfd)
+    # we should only pass in path indices that are unsafe
+    safe_indices = get_safe(mfd, len(paths), paths, indices)
+    # TODO: get unsafe indices to pass in to all_maximal_safe_paths_top_down
+
+    # all_maximal_safe_paths_top_down(mfd, U, max_safe_paths)
 
     return paths, max_safe_paths
 
