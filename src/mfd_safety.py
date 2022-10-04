@@ -104,6 +104,22 @@ def build_base_ilp_model(data, size):
     return model, x, w, z
 
 
+def build_ilp_model_avoiding_multiple_paths(data, size, paths):
+
+    model, x, _, _ = build_base_ilp_model(data, size)
+
+    R = range(len(paths))
+    r = model.addVars(R, vtype=GRB.BINARY, name="r")
+    model.setObjective(sum(r[p] for p in range(len(paths))), GRB.MAXIMIZE)
+
+    # group testing constraint
+    for p, path in enumerate(paths):
+        for k in range(size):
+            model.addConstr(sum(x[u, v, i, k] for (u, v, i) in path) <= len(path) - r[p])
+
+    return model
+
+
 def build_ilp_model_avoiding_path(data, size, path):
 
     model, x, _, _ = build_base_ilp_model(data, size)
@@ -347,6 +363,22 @@ def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first,
     return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first + 1 + exp, last, first + 1 + 2 * exp + 1)
 
 
+def get_safe(paths, mfd):
+    """Takes in a set of paths and returns those paths that are safe."""
+    # should paths be indices?
+
+
+def compute_maximal_safe_paths_using_group(mfd):
+    """Use group testing in a top down fashion."""
+
+    paths = mfd['solution']
+    max_safe_paths = list()
+
+    # run AllMaximalSafePathsTopDown(mfd)
+
+    return paths, max_safe_paths
+
+
 def compute_maximal_safe_paths(mfd):
 
     paths = mfd['solution']
@@ -368,6 +400,8 @@ def compute_maximal_safe_paths(mfd):
                 last = mfd['extension_strategy_large'](mfd, paths, path, first, last)
             else:
                 last = mfd['extension_strategy_small'](mfd, paths, path, first, last)
+
+                # run AllMaximalSafePathsTopDown(mfd)
 
             maximal_safe_paths.append((first, last + 1))
             if last == len(path) - 1:
@@ -680,7 +714,8 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
     return original_path
 
 
-def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strategy=dict()):
+def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
+                           use_group_top_down=False, strategy=dict()):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -704,7 +739,7 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strat
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else (compute_maximal_safe_paths_using_group if use_group_top_down else compute_maximal_safe_paths),
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
@@ -718,7 +753,8 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False, strat
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow=False, use_y_to_v=False, strategy=dict()):
+def solve_instances_safety(graphs, output_file, use_excess_flow=False,
+                           use_y_to_v=False, use_group_top_down=False, strategy=dict()):
 
     output = open(output_file, 'w+')
     output_stats = open(f'{output_file}.stats', 'w+')
@@ -731,7 +767,8 @@ def solve_instances_safety(graphs, output_file, use_excess_flow=False, use_y_to_
         if not graph['edges']:
             continue
 
-        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v, strategy)
+        mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v,
+                                     use_group_top_down, strategy)
 
         if use_y_to_v:
             output_stats.write(f'Y2V: {len(mfd["graph"].edges)}/{len(mfd["mapping"][0].edges)}\n')
@@ -849,6 +886,8 @@ if __name__ == '__main__':
     parser.add_argument('-ilptb', '--ilp-time-budget', type=float, help='Maximum time (in seconds) that the ilp solver is allowed to take when computing safe paths')
 
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
+    parser.add_argument('-ugtd', '--use-group-top-down', action='store_true',
+                        help='Use top down group testing')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
 
     parser.add_argument('-s', '--strategy', type=str, help='Strategy for extension and reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search}')
@@ -876,4 +915,6 @@ if __name__ == '__main__':
     ilp_counter = 0
     ilp_time_budget = args.ilp_time_budget
     time_budget = args.ilp_time_budget
-    solve_instances_safety(read_input(args.input), args.output, args.use_excess_flow, args.use_y_to_v, get_strategy(args))
+    solve_instances_safety(read_input(args.input), args.output,
+                           args.use_excess_flow, args.use_y_to_v,
+                           args.use_group_top_down, get_strategy(args))
