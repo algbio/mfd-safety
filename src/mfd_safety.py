@@ -371,7 +371,10 @@ def get_unsafe_unknown(model, test):
     return list(), test
 
 
-def get_trivially_safe_rest(mfd, k, paths, test): ## Here excess flow can be used :)
+def get_trivially_safe_rest(mfd, k, paths, test, use_excess_flow):
+    if use_excess_flow:
+        fd_safe = [get_excess_flow(paths[p][i:j], mfd) > 0 for p, i, j in test]
+        return [(p, i, j) for p, i, j in test if fd_safe[p]], [(p, i, j) for p, i, j in test if not fd_safe[p]]
     return [(p, i, j) for p, i, j in test if i == j+1], [(p, i, j) for p, i, j in test if i != j+1]
 
 
@@ -405,7 +408,7 @@ def get_reductions(unsafe_paths):
     return list(set([(p, i+1, j) for p, i, j in unsafe_paths] + [(p, i, j-1) for p, i, j in unsafe_paths if i >= 0]))
 
 
-def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe):
+def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe, use_excess_flow=False):
     """
     Use group testing in a top down fashion.
     Implements algorithm 6 from paper.
@@ -416,7 +419,7 @@ def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe):
     paths = mfd['solution']
     test = get_reductions(unsafe_paths)
 
-    t_safe, test = get_trivially_safe_rest(mfd, len(paths), paths, test)
+    t_safe, test = get_trivially_safe_rest(mfd, len(paths), paths, test, use_excess_flow)
     safe, unsafe = get_safe_unsafe(mfd, len(paths), paths, test)
     safe += t_safe
 
@@ -427,6 +430,20 @@ def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe):
             max_safe.append((p, i, j))
 
     all_maximal_safe_paths_top_down(mfd, unsafe, max_safe)
+
+
+def compute_maximal_safe_paths_using_group_and_excess_flow(mfd):
+
+    paths = mfd['solution']
+
+    max_safe = list()
+    all_maximal_safe_paths_top_down(mfd, [(p, -1, len(path)) for p, path in enumerate(paths)], max_safe, use_excess_flow = True)
+
+    maximal_safe_paths = [[] for path in paths]
+    for p, i, j in max_safe:
+        maximal_safe_paths[p].append((i, j))
+
+    return paths, maximal_safe_paths
 
 
 def compute_maximal_safe_paths_using_group(mfd):
@@ -803,7 +820,7 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_excess_flow if use_excess_flow else (compute_maximal_safe_paths_using_group if use_group_top_down else compute_maximal_safe_paths),
+        'compute': compute_maximal_safe_paths_using_group_and_excess_flow if use_excess_flow and use_group_top_down else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths_using_group if use_group_top_down else compute_maximal_safe_paths,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
