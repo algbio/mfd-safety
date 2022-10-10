@@ -931,7 +931,8 @@ def solve_instances_safety(graphs, output_file, output_stats=False, use_excess_f
                 stats.write(f'Unique decomposition: 0\n')
 
     output.close()
-    stats.close()
+    if output_stats:
+        stats.close()
 
 
 def parse_strategy(strategy_str):
