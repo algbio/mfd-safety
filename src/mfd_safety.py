@@ -897,7 +897,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow=False, output_st
                 output_maximal_safe_path(output, trivial_path)
 
         if output_stats:
-            stats.write(f'Decomposition size: {len(mfd["trivial_paths"]) if "trivial_paths" in mfd else 0 + len(mfd["solution"])  if "solution" in mfd else 0}\n')
+            stats.write(f'Decomposition size: {(len(mfd["trivial_paths"]) if "trivial_paths" in mfd else 0) + (len(mfd["solution"])  if "solution" in mfd else 0)}\n')
             stats.write(f'ILP count: {ilp_counter}\n')
             if ilp_time_budget:
                 stats.write(f'ILP time used: {ilp_time_budget-time_budget}/{ilp_time_budget}\n')
