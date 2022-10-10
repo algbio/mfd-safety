@@ -9,6 +9,7 @@ import gurobipy as gp
 from gurobipy import GRB
 from collections import deque
 from bisect import bisect
+from copy import deepcopy
 
 
 class TimeoutILP(Exception):
@@ -49,13 +50,34 @@ def read_input(graph_file):
     return read_input_graphs(graph_file)
 
 
+def mfd_algorithm_repeated_exp_search(data, base_unfeasible, sequential_threshold):
+
+    exp = 1
+    while fd_fixed_size(data, base_unfeasible+exp)['message'] != 'solved':
+        exp *= 2
+
+    if exp <= 2*sequential_threshold:
+        data_copy = deepcopy(data)
+        for i in range(base_unfeasible+int(exp/2)+1, base_unfeasible+exp):
+            if fd_fixed_size(data, i)['message'] == 'solved':
+                return i
+        data.update(data_copy)
+        return base_unfeasible+exp
+
+    return mfd_algorithm_repeated_exp_search(data, base_unfeasible+int(exp/2), sequential_threshold)
+
+
 def mfd_algorithm(data):
 
+    sequential_threshold = data['sequential_threshold']
+
     data['message'] = 'unsolved'
-    for i in range(1, len(data['graph'].edges) + 1):
-        data = fd_fixed_size(data, i)
-        if data['message'] == 'solved':
-            return data
+    if sequential_threshold == 0:
+        for i in range(1, len(data['graph'].edges) + 1):
+            if fd_fixed_size(data, i)['message'] == 'solved':
+                return data
+    else:
+        mfd_algorithm_repeated_exp_search(data, 0, sequential_threshold)
 
     return data
 
@@ -788,7 +810,7 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
 
 def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
                            use_group_top_down=False, use_group_bottom_up=False,
-                           strategy=dict()):
+                           sequential_threshold=0, strategy=dict()):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -823,13 +845,14 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
         'reduction_strategy_large': find_left_minimal_reduction_scan if 'reduction_strategy_large' not in strategy else strategy['reduction_strategy_large'],
         'reduction_strategy_threshold': float('-inf') if 'reduction_strategy_threshold' not in strategy else strategy['reduction_strategy_threshold'],
         'extension_strategy_threshold': float('-inf') if 'extension_strategy_threshold' not in strategy else strategy['extension_strategy_threshold'],
-        'use_excess_flow': use_excess_flow
+        'use_excess_flow': use_excess_flow,
+        'sequential_threshold': sequential_threshold,
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow=False, output_stats=False,
-                           use_y_to_v=False, use_group_top_down=False,
-                           use_group_bottom_up=False, strategy=dict()):
+def solve_instances_safety(graphs, output_file, output_stats=False, use_excess_flow=False,
+                           use_y_to_v=False, use_group_top_down=False, use_group_bottom_up=False,
+                           sequential_threshold=0, strategy=dict()):
 
     output = open(output_file, 'w+')
     if output_stats:
@@ -846,7 +869,7 @@ def solve_instances_safety(graphs, output_file, use_excess_flow=False, output_st
 
         mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v,
                                      use_group_top_down, use_group_bottom_up,
-                                     strategy)
+                                     sequential_threshold, strategy)
 
         if output_stats and use_y_to_v:
             stats.write(f'Y2V: {len(mfd["graph"].edges)}/{len(mfd["mapping"][0].edges)}\n')
@@ -985,6 +1008,9 @@ if __name__ == '__main__':
                         help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
     parser.add_argument('-t', '--threads', type=int, default=0,
                         help='Number of threads to use for the Gurobi solver; use 0 for all threads (default 0).')
+    parser.add_argument('-seqt', '--sequential-threshold', type=int, default=0,
+                        help='A repeated exponential search is performed to find the minimum flow decomposition, this parameter specifies the universe size at which a sequencial search is performed instead; use 0 to only perform sequential search (default 0).')
+
     parser.add_argument('-ilptb', '--ilp-time-budget', type=float, help='Maximum time (in seconds) that the ilp solver is allowed to take when computing safe paths')
 
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
@@ -1022,4 +1048,4 @@ if __name__ == '__main__':
     solve_instances_safety(read_input(args.input), args.output, args.output_stats,
                            args.use_excess_flow, args.use_y_to_v,
                            args.use_group_top_down, args.use_group_bottom_up,
-                           get_strategy(args))
+                           args.sequential_threshold, get_strategy(args))
