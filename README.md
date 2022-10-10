@@ -3,13 +3,13 @@
 mfd-safety is a tool reporting maximal safe paths for minimum flow decompositions (mfd) using ILP calls,
 and implementing several optimization to reduce the number of ILP calls or their size (number of variables/constrains).
 
-### Installation
+# Installation
 
 - Install [miniconda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)
 - Clone our this repository and `cd` to the corresponding folder
 - `conda env create -f conda_environment.yml`
 
-### Run
+# Run
 
 To run the project activate the conda environment you created during installation (`conda activate mfd-safety`) and use
 `python` to execute the `mfd_safety.py` file.
@@ -52,23 +52,23 @@ and the `large strategy` otherwise.
 - `-ugtd/-ugbu` Run a group testing algorithm (top down or bottom up) instead of two-finger.
 
 
-### Our experiments
+# Our experiments
 
 ## Commands
 
-# Two-Finger
+### Two-Finger
 
 `python ./src/mfd_safety.py -i <input> -o <output> -t 12 -uy2v -uef [-ilptb 120]`
 
-# Two-Finger Optimized Search
+### Two-Finger Optimized Search
 
 `python ./src/mfd_safety.py -i <input> -o <output> -t 12 -uy2v -uef -st 8 -esl bin_search -ess exp_search -rsl bin_search -rss exp_search [-ilptb 120]`
 
-# Group Testing Bottom-Up
+### Group Testing Bottom-Up
 
 `python ./src/mfd_safety.py -i <input> -o <output> -t 12 -uy2v -uef -ugbu [-ilptb 120]`
 
-# Group Testing Top-Down
+### Group Testing Top-Down
 
 `python ./src/mfd_safety.py -i <input> -o <output> -t 12 -uy2v -uef -ugtd [-ilptb 120]`
 
