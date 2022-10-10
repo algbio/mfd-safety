@@ -95,7 +95,9 @@ def build_base_ilp_model(data, size):
 
     # Create a new model
     model = gp.Model('MFD')
-    model.Params.LogToConsole = 0
+    model.setParam('LogToConsole', 0)
+    model.setParam('Threads', threads)
+
 
     # Create variables
     x = model.addVars(T, vtype=GRB.BINARY, name='x')
@@ -122,6 +124,7 @@ def build_base_ilp_model(data, size):
             model.addConstr(z[u, v, i, k] <= max_flow_value * x[u, v, i, k])
             model.addConstr(w[k] - (1 - x[u, v, i, k]) * max_flow_value <= z[u, v, i, k])
             model.addConstr(z[u, v, i, k] <= w[k])
+
 
     return model, x, w, z
 
@@ -1012,7 +1015,7 @@ if __name__ == '__main__':
     parser.add_argument('-seqt', '--sequential-threshold', type=int, default=0,
                         help='A repeated exponential search is performed to find the minimum flow decomposition, this parameter specifies the universe size at which a sequencial search is performed instead; use 0 to only perform sequential search (default 0).')
 
-    parser.add_argument('-ilptb', '--ilp-time-budget', type=float, help='Maximum time (in seconds) that the ilp solver is allowed to take when computing safe paths')
+    parser.add_argument('-ilptb', '--ilp-time-budget', type=float, help='Maximum time (in seconds) that the ilp solver is allowed to take when computing safe paths for one graph')
 
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-ugtd', '--use-group-top-down', action='store_true',
