@@ -317,24 +317,24 @@ def find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first
     return find_right_maximal_extension_repeated_exp_search_rec(mfd, paths, path, first, last + 1 + exp, min(last + 1 + 2 * exp + 1, len(path)))
 
 
-def find_left_minimal_reduction_scan(mfd, paths, path, first, last, limit=None):
+def find_left_minimal_reduction_scan(mfd, paths, path, first, last, limit):
 
     first += 1
-    while first < limit if limit else last + 1 and not is_safe(mfd, len(paths), path, first, last + 2):
+    while first < limit and not is_safe(mfd, len(paths), path, first, last + 2):
         first += 1
 
     return first
 
 
-def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit=None):
+def find_left_minimal_reduction_bin_search(mfd, paths, path, first, last, limit):
 
-    return bisect(range(first + 1, limit if limit else last + 1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path, i, last + 2) else 0) + first + 1
+    return bisect(range(first + 1, limit), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path, i, last + 2) else 0) + first + 1
 
 
-def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit=None):
+def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit):
 
     exp = 0
-    while first + 1 + exp < limit if limit else last + 1 and not is_safe(mfd, len(paths), path, first+1+exp, last + 2):
+    while first + 1 + exp < limit and not is_safe(mfd, len(paths), path, first+1+exp, last + 2):
         exp = 2 * exp + 1
 
     if exp < 3:
@@ -345,8 +345,8 @@ def find_left_minimal_reduction_exp_search(mfd, paths, path, first, last, limit=
     return bisect(range(first + 2 + exp, first + 1 + 2*exp+1), 0, key=lambda i: 1 if is_safe(mfd, len(paths), path, i, last + 2) else 0) + first + 2 + exp
 
 
-def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last, limit=None):
-    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit if limit else last + 1)
+def find_left_minimal_reduction_repeated_exp_search(mfd, paths, path, first, last, limit):
+    return find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit)
 
 
 def find_left_minimal_reduction_repeated_exp_search_rec(mfd, paths, path, first, last, limit):
@@ -404,6 +404,34 @@ def get_safe_unsafe(mfd, k, paths, test):
         return s, unsafe+u
 
 
+def get_extensions(safe_paths, paths):
+    return list(set([(p, i-1, j) for p, i, j in safe_paths if i >= 0] + [(p, i, j+1) for p, i, j in safe_paths if j < len(paths[p])]))
+
+
+def all_maximal_safe_paths_bottom_up(mfd, safe_paths, max_safe, use_excess_flow=False):
+    """
+    Use group testing in a bottom up fashion.
+    Implements algorithm x from paper.
+    """
+    if not safe_paths:
+        return
+
+    paths = mfd['solution']
+    test = get_extensions(safe_paths, paths)
+
+    t_safe, test = get_trivially_safe_rest(mfd, len(paths), paths, test, use_excess_flow)
+    safe, unsafe = get_safe_unsafe(mfd, len(paths), paths, test)
+    safe += t_safe
+
+    for p, i, j in safe_paths:
+        right_maximal = j == len(paths[p]) or (p, i, j + 1) in unsafe
+        left_maximal = i == 0 or (p, i-1, j) in unsafe
+        if right_maximal and left_maximal:
+            max_safe.append((p, i, j))
+
+    all_maximal_safe_paths_bottom_up(mfd, safe, max_safe)
+
+
 def get_reductions(unsafe_paths):
     return list(set([(p, i+1, j) for p, i, j in unsafe_paths] + [(p, i, j-1) for p, i, j in unsafe_paths if i >= 0]))
 
@@ -432,12 +460,12 @@ def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe, use_excess_flow
     all_maximal_safe_paths_top_down(mfd, unsafe, max_safe)
 
 
-def compute_maximal_safe_paths_using_group_and_excess_flow(mfd):
+def compute_maximal_safe_paths_using_group_bottom_up(mfd):
 
     paths = mfd['solution']
 
     max_safe = list()
-    all_maximal_safe_paths_top_down(mfd, [(p, -1, len(path)) for p, path in enumerate(paths)], max_safe, use_excess_flow = True)
+    all_maximal_safe_paths_bottom_up(mfd, [(p, i, i+1) for p, path in enumerate(paths) for i in range(len(path))], max_safe, use_excess_flow=mfd['use_excess_flow'])
 
     maximal_safe_paths = [[] for path in paths]
     for p, i, j in max_safe:
@@ -446,12 +474,12 @@ def compute_maximal_safe_paths_using_group_and_excess_flow(mfd):
     return paths, maximal_safe_paths
 
 
-def compute_maximal_safe_paths_using_group(mfd):
+def compute_maximal_safe_paths_using_group_top_down(mfd):
 
     paths = mfd['solution']
 
     max_safe = list()
-    all_maximal_safe_paths_top_down(mfd, [(p, -1, len(path)) for p, path in enumerate(paths)], max_safe)
+    all_maximal_safe_paths_top_down(mfd, [(p, -1, len(path)) for p, path in enumerate(paths)], max_safe, use_excess_flow=mfd['use_excess_flow'])
 
     maximal_safe_paths = [[] for path in paths]
     for p, i, j in max_safe:
@@ -460,68 +488,29 @@ def compute_maximal_safe_paths_using_group(mfd):
     return paths, maximal_safe_paths
 
 
-def compute_maximal_safe_paths(mfd):
+def compute_maximal_safe_paths_using_two_finger(mfd):
 
     paths = mfd['solution']
+    use_excess_flow = mfd['use_excess_flow']
+
     max_safe_paths = list()
 
     for path in paths:
 
         maximal_safe_paths = list()
 
-        # two-finger algorithm
-        # Invariant: path[first:last+1] (python notation) is safe
         first = 0
         last = 0
 
         while True:
 
             # Extending
-            if len(path) - last > mfd['extension_strategy_threshold']:
-                last = mfd['extension_strategy_large'](mfd, paths, path, first, last)
-            else:
-                last = mfd['extension_strategy_small'](mfd, paths, path, first, last)
+            if use_excess_flow:
+                excess_flow = get_excess_flow(path[first:last+1], mfd)
 
-                # run AllMaximalSafePathsTopDown(mfd)
-
-            maximal_safe_paths.append((first, last + 1))
-            if last == len(path) - 1:
-                break
-
-            # Reducing
-            if last+1 - first > mfd['reduction_strategy_threshold']:
-                first = mfd['reduction_strategy_large'](mfd, paths, path, first, last)
-            else:
-                first = mfd['reduction_strategy_small'](mfd, paths, path, first, last)
-
-            last += 1
-
-        max_safe_paths.append(maximal_safe_paths)
-
-    return paths, max_safe_paths
-
-
-def compute_maximal_safe_paths_using_excess_flow(mfd):
-
-    paths = mfd['solution']
-    max_safe_paths = list()
-
-    for path in paths:
-
-        maximal_safe_paths = list()
-
-        # two-finger algorithm
-        # Invariant: path[first:last+1] (python notation) is safe
-        first = 0
-        last = 0
-
-        while True:
-
-            excess_flow = get_excess_flow(path[first:last+1], mfd)
-            # Extending
-            while last+1 < len(path) and excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd) > 0:
-                excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
-                last += 1
+                while last+1 < len(path) and excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd) > 0:
+                    excess_flow = excess_flow - mfd['out_flow'][path[last][1]] + get_flow(path[last + 1], mfd)
+                    last += 1
 
             if len(path) - last > mfd['extension_strategy_threshold']:
                 last = mfd['extension_strategy_large'](mfd, paths, path, first, last)
@@ -529,17 +518,19 @@ def compute_maximal_safe_paths_using_excess_flow(mfd):
                 last = mfd['extension_strategy_small'](mfd, paths, path, first, last)
 
             maximal_safe_paths.append((first, last + 1))
-
             if last == len(path) - 1:
                 break
 
             # Reducing
-            ef = get_flow(path[last+1], mfd)
-            limit = last+1
+            if use_excess_flow:
+                ef = get_flow(path[last+1], mfd)
+                limit = last+1
 
-            while limit > 0 and ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd) > 0:
-                ef = ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd)
-                limit -= 1
+                while limit > 0 and ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd) > 0:
+                    ef = ef - mfd['out_flow'][path[limit][0]] + get_flow(path[limit - 1], mfd)
+                    limit -= 1
+            else:
+                limit = last+1
 
             if limit - first > mfd['reduction_strategy_threshold']:
                 first = mfd['reduction_strategy_large'](mfd, paths, path, first, last, limit)
@@ -796,7 +787,8 @@ def get_expanded_path(path, graph, original_graph, out_contraction_graph):
 
 
 def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
-                           use_group_top_down=False, strategy=dict()):
+                           use_group_top_down=False, use_group_bottom_up=False,
+                           strategy=dict()):
 
     # creation of NetworkX Graph
     ngraph = nx.MultiDiGraph()
@@ -820,56 +812,67 @@ def compute_graph_metadata(graph, use_excess_flow=False, use_y_to_v=False,
         'sources': sources,
         'sinks': sinks,
         'max_flow_value': max(ngraph.edges(data='flow'), key=lambda e: e[-1])[-1] if len(ngraph.edges) > 0 else -1,
-        'compute': compute_maximal_safe_paths_using_group_and_excess_flow if use_excess_flow and use_group_top_down else compute_maximal_safe_paths_using_excess_flow if use_excess_flow else compute_maximal_safe_paths_using_group if use_group_top_down else compute_maximal_safe_paths,
+        'compute': compute_maximal_safe_paths_using_group_bottom_up if use_group_bottom_up else compute_maximal_safe_paths_using_group_top_down if use_group_top_down else compute_maximal_safe_paths_using_two_finger,
         'in_flow': in_flow if use_excess_flow else None,
         'out_flow': out_flow if use_excess_flow else None,
         'mapping': mapping if use_y_to_v else None,
-        'trivial_paths': trivial_paths if use_y_to_v else None,
+        'trivial_paths': trivial_paths if use_y_to_v else list(),
         'extension_strategy_small': find_right_maximal_extension_scan if 'extension_strategy_small' not in strategy else strategy['extension_strategy_small'],
         'extension_strategy_large': find_right_maximal_extension_scan if 'extension_strategy_large' not in strategy else strategy['extension_strategy_large'],
         'reduction_strategy_small': find_left_minimal_reduction_scan if 'reduction_strategy_small' not in strategy else strategy['reduction_strategy_small'],
         'reduction_strategy_large': find_left_minimal_reduction_scan if 'reduction_strategy_large' not in strategy else strategy['reduction_strategy_large'],
         'reduction_strategy_threshold': float('-inf') if 'reduction_strategy_threshold' not in strategy else strategy['reduction_strategy_threshold'],
         'extension_strategy_threshold': float('-inf') if 'extension_strategy_threshold' not in strategy else strategy['extension_strategy_threshold'],
+        'use_excess_flow': use_excess_flow
     }
 
 
-def solve_instances_safety(graphs, output_file, use_excess_flow=False,
-                           use_y_to_v=False, use_group_top_down=False, strategy=dict()):
+def solve_instances_safety(graphs, output_file, use_excess_flow=False, output_stats=False,
+                           use_y_to_v=False, use_group_top_down=False,
+                           use_group_bottom_up=False, strategy=dict()):
 
     output = open(output_file, 'w+')
-    output_stats = open(f'{output_file}.stats', 'w+')
+    if output_stats:
+        stats = open(f'{output_file}.stats', 'w+')
 
     for g, graph in enumerate(graphs):
 
         output.write(f'# graph {g}\n')
-        output_stats.write(f'# graph {g}\n')
+        if output_stats:
+            stats.write(f'# graph {g}\n')
 
         if not graph['edges']:
             continue
 
         mfd = compute_graph_metadata(graph, use_excess_flow, use_y_to_v,
-                                     use_group_top_down, strategy)
+                                     use_group_top_down, use_group_bottom_up,
+                                     strategy)
 
-        if use_y_to_v:
-            output_stats.write(f'Y2V: {len(mfd["graph"].edges)}/{len(mfd["mapping"][0].edges)}\n')
+        if output_stats and use_y_to_v:
+            stats.write(f'Y2V: {len(mfd["graph"].edges)}/{len(mfd["mapping"][0].edges)}\n')
+
+        global time_budget
+        time_budget = ilp_time_budget
 
         global ilp_counter
         ilp_counter = 0
-        global time_budget
-        time_budget = ilp_time_budget
+
+        if output_stats:
+            is_unique_decomposition = True
 
         if len(mfd['graph'].edges) > 0:
 
             try:
                 mfd = mfd_algorithm(mfd)
                 paths, max_safe_paths = mfd['compute'](mfd)
-                output_stats.write('timeout: 0\n')
+                if output_stats:
+                    stats.write('timeout: 0\n')
 
             except TimeoutILP:
 
                 paths, max_safe_paths = compute_maximal_safe_paths_for_flow_decompositions(mfd)
-                output_stats.write('timeout: 1\n')
+                if output_stats:
+                    stats.write('timeout: 1\n')
 
             for path, maximal_safe_paths in zip(paths, max_safe_paths):
                 # print path
@@ -879,16 +882,33 @@ def solve_instances_safety(graphs, output_file, use_excess_flow=False,
                         max_path = get_expanded_path(max_path, mfd['graph'], mfd['mapping'][0], mfd['mapping'][1])
                     output_maximal_safe_path(output, max_path)
 
+                if output_stats and is_unique_decomposition:
+                    is_unique_decomposition = len(maximal_safe_paths) == 1
+                    if is_unique_decomposition:
+                        max_path = maximal_safe_paths[0]
+                        is_unique_decomposition = max_path == (0, len(path))
+
+        else:
+            if output_stats:
+                stats.write('timeout: 0\n')
+
         if use_y_to_v:
             for trivial_path in mfd['trivial_paths']:
                 output_maximal_safe_path(output, trivial_path)
 
-        output_stats.write(f'ILP count: {ilp_counter}\n')
-        if ilp_time_budget:
-            output_stats.write(f'ILP time used: {ilp_time_budget-time_budget}/{ilp_time_budget}\n')
+        if output_stats:
+            stats.write(f'Decomposition size: {len(mfd["trivial_paths"]) if "trivial_paths" in mfd else 0 + len(mfd["solution"])  if "solution" in mfd else 0}\n')
+            stats.write(f'ILP count: {ilp_counter}\n')
+            if ilp_time_budget:
+                stats.write(f'ILP time used: {ilp_time_budget-time_budget}/{ilp_time_budget}\n')
+
+            if is_unique_decomposition:
+                stats.write(f'Unique decomposition: 1\n')
+            else:
+                stats.write(f'Unique decomposition: 0\n')
 
     output.close()
-    output_stats.close()
+    stats.close()
 
 
 def parse_strategy(strategy_str):
@@ -960,6 +980,7 @@ if __name__ == '__main__':
         ''',
         formatter_class=argparse.RawTextHelpFormatter
     )
+    parser.add_argument('-stats', '--output-stats', action='store_true', help='Output stats to file <output>.stats')
     parser.add_argument('-wt', '--weighttype', type=str, default='int+',
                         help='Type of path weights (default int+):\n   int+ (positive non-zero ints), \n   float+ (positive non-zero floats).')
     parser.add_argument('-t', '--threads', type=int, default=0,
@@ -969,6 +990,8 @@ if __name__ == '__main__':
     parser.add_argument('-uef', '--use-excess-flow', action='store_true', help='Use excess flow of a path to save ILP calls')
     parser.add_argument('-ugtd', '--use-group-top-down', action='store_true',
                         help='Use top down group testing')
+    parser.add_argument('-ugbu', '--use-group-bottom-up', action='store_true',
+                        help='Use bottom up group testing')
     parser.add_argument('-uy2v', '--use-y-to-v', action='store_true', help='Use Y to V contraction of the input graphs')
 
     parser.add_argument('-s', '--strategy', type=str, help='Strategy for extension and reduction of two-finger algorithm {scan, bin_search, exp_search, rep_exp_search}')
@@ -996,6 +1019,7 @@ if __name__ == '__main__':
     ilp_counter = 0
     ilp_time_budget = args.ilp_time_budget
     time_budget = args.ilp_time_budget
-    solve_instances_safety(read_input(args.input), args.output,
+    solve_instances_safety(read_input(args.input), args.output, args.output_stats,
                            args.use_excess_flow, args.use_y_to_v,
-                           args.use_group_top_down, get_strategy(args))
+                           args.use_group_top_down, args.use_group_bottom_up,
+                           get_strategy(args))
