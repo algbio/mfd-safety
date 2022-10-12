@@ -457,8 +457,8 @@ def all_maximal_safe_paths_bottom_up(mfd, safe_paths, max_safe, use_excess_flow=
     all_maximal_safe_paths_bottom_up(mfd, safe, max_safe)
 
 
-def get_reductions(unsafe_paths):
-    return list(set([(p, i+1, j) for p, i, j in unsafe_paths] + [(p, i, j-1) for p, i, j in unsafe_paths if i >= 0]))
+def get_reductions(unsafe_paths, paths):
+    return list(set([(p, i+1, j) for p, i, j in unsafe_paths if j == len(paths[p]) or (p, i+1, j+1) in unsafe_paths] + [(p, i, j-1) for p, i, j in unsafe_paths if (i >= 0) and (i == 0 or (i-1, j-1, p) in unsafe_paths)]))
 
 
 def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe, use_excess_flow=False):
@@ -470,17 +470,14 @@ def all_maximal_safe_paths_top_down(mfd, unsafe_paths, max_safe, use_excess_flow
         return
 
     paths = mfd['solution']
-    test = get_reductions(unsafe_paths)
+    test = get_reductions(unsafe_paths, paths)
 
     t_safe, test = get_trivially_safe_rest(mfd, len(paths), paths, test, use_excess_flow)
     safe, unsafe = get_safe_unsafe(mfd, len(paths), paths, test)
     safe += t_safe
 
     for p, i, j in safe:
-        right_maximal = j == len(paths[p]) or (p, i, j + 1) in unsafe_paths
-        left_maximal = i == 0 or (p, i-1, j) in unsafe_paths
-        if right_maximal and left_maximal:
-            max_safe.append((p, i, j))
+        max_safe.append((p, i, j))
 
     all_maximal_safe_paths_top_down(mfd, unsafe, max_safe)
 
