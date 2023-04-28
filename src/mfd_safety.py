@@ -155,6 +155,23 @@ def build_ilp_model_avoiding_path(data, size, path):
 
     return model
 
+def build_ilp_model_with_subpath_constraints(data,size,subpaths):
+
+    model, x, _, _ = build_base_ilp_model(data, size)
+
+    S = [(s,k) for s in range(len(subpaths)) for k in range(size)]
+    rho = model.addVars(S, vtype=GRB.BINARY, name="s")
+
+    # subpath constraints
+    for p, path in enumerate(subpaths):
+        for k in range(size):
+            model.addConstr(sum(x[u, v, i, k] for (u, v, i) in path) >= len(path)*rho[p,k])
+            # guarantee that all edges of a subpath are selected 
+        
+        model.addConstr(sum(rho[p,k] for k in range(size)) >= 1)
+        # subpath is present in at least one of the $k$ paths
+    
+    return model
 
 def get_solution(model, data, size):
 
