@@ -25,6 +25,7 @@ As an example you can try:
 `u` to  `v` carrying `f` flow is represented in a separated line in the format `u v f`.
 - Vertices must be integers following a topological order of the graph.
 - An example of such a format can be found in `./example_inputs/example.graph`.
+- To specify subpath constraints, after the specification of each graph add a line 'subpaths' followed by the subpaths, one on each line. A subpath is specified as the corresponding sequence of vertices (separated by spaces) followed by '1.0', an example can be found in `./example_inputs/example_subpaths.graph`
 
 ## Output
 
@@ -74,4 +75,5 @@ and the `large strategy` otherwise.
 
 ## Datasets
 
-The datasets can be found in Zenodo at: [https://zenodo.org/record/7182096](https://zenodo.org/record/7182096)
+The datasets can be found in Zenodo at: [https://doi.org/10.5281/zenodo.8275700](https://doi.org/10.5281/zenodo.8275700
+)
